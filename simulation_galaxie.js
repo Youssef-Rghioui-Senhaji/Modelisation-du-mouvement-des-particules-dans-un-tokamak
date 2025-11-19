@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulation de Galaxie</title>
+    <style>
+		body {
+			font-family: Arial, sans-serif;
+			margin: 30px;
+			background: #f5f5f5;
+			}
+			h2 {
+			margin-top: 40px;
+			color: #333;
+		}
+		    /* --- SWITCH --- */
+		.switch {
+		position: relative;
+		display: inline-block;
+		width: 60px;
+		height: 30px;
+		margin: 10px;
+		}
+		.switch input { opacity: 0; width: 0; height: 0; }
+		.slider-switch {
+		position: absolute;
+		cursor: pointer;
+		top: 0; left: 0; right: 0; bottom: 0;
+		background-color: #ccc;
+		border-radius: 30px;
+		transition: 0.4s;
+		}
+		.slider-switch:before {
+		position: absolute;
+		content: "";
+		height: 22px; width: 22px;
+		left: 4px; bottom: 4px;
+		background-color: white;
+		border-radius: 50%;
+		transition: 0.4s;
+		}
+		input:checked + .slider-switch { background-color: #2ecc71; }
+		input:checked + .slider-switch:before { transform: translateX(30px); }
+
+    </style>
+</head>
+<body>
+
+	<div id="cameraInfo" style="position: absolute; top: 10px; left: 100px; color: white; font-size: 25px; background-color: rgba(0, 0, 0, 0.5); padding: 10px;"></div>
+    <canvas id="galaxyCanvas"></canvas>
+	<h1>Trajectoire particule</h1>
+	<label class="switch">
+		<input type="checkbox" id="toggleVisibility">
+		<span class="slider-switch"></span>
+	</label>
+	<span id="statusText">Option désactivée</span>
+	<script>// stats.js - http://github.com/mrdoob/stats.js
+			(function(f,e){"object"===typeof exports&&"undefined"!==typeof module?module.exports=e():"function"===typeof define&&define.amd?define(e):f.Stats=e()})(this,function(){var f=function(){function e(a){c.appendChild(a.dom);return a}function u(a){for(var d=0;d<c.children.length;d++)c.children[d].style.display=d===a?"block":"none";l=a}var l=0,c=document.createElement("div");c.style.cssText="position:fixed;top:0;left:0;cursor:pointer;opacity:0.9;z-index:10000";c.addEventListener("click",function(a){a.preventDefault();
+			u(++l%c.children.length)},!1);var k=(performance||Date).now(),g=k,a=0,r=e(new f.Panel("FPS","#0ff","#002")),h=e(new f.Panel("MS","#0f0","#020"));if(self.performance&&self.performance.memory)var t=e(new f.Panel("MB","#f08","#201"));u(0);return{REVISION:16,dom:c,addPanel:e,showPanel:u,begin:function(){k=(performance||Date).now()},end:function(){a++;var c=(performance||Date).now();h.update(c-k,200);if(c>=g+1E3&&(r.update(1E3*a/(c-g),100),g=c,a=0,t)){var d=performance.memory;t.update(d.usedJSHeapSize/
+			1048576,d.jsHeapSizeLimit/1048576)}return c},update:function(){k=this.end()},domElement:c,setMode:u}};f.Panel=function(e,f,l){var c=Infinity,k=0,g=Math.round,a=g(window.devicePixelRatio||1),r=80*a,h=48*a,t=3*a,v=2*a,d=3*a,m=15*a,n=74*a,p=30*a,q=document.createElement("canvas");q.width=r;q.height=h;q.style.cssText="width:80px;height:48px";var b=q.getContext("2d");b.font="bold "+9*a+"px Helvetica,Arial,sans-serif";b.textBaseline="top";b.fillStyle=l;b.fillRect(0,0,r,h);b.fillStyle=f;b.fillText(e,t,v);
+			b.fillRect(d,m,n,p);b.fillStyle=l;b.globalAlpha=.9;b.fillRect(d,m,n,p);return{dom:q,update:function(h,w){c=Math.min(c,h);k=Math.max(k,h);b.fillStyle=l;b.globalAlpha=1;b.fillRect(0,0,r,m);b.fillStyle=f;b.fillText(g(h)+" "+e+" ("+g(c)+"-"+g(k)+")",t,v);b.drawImage(q,d+a,m,n-a,p,d,m,n-a,p);b.fillRect(d+n-a,m,a,p);b.fillStyle=l;b.globalAlpha=.9;b.fillRect(d+n-a,m,a,g((1-h/w)*p))}}};return f});</script></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/three/examples/js/controls/OrbitControls.js"></script>	
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.5.0/math.min.js"></script>
+	
+    
+	<script>
+	
+		var stats = new Stats();
+		stats.showPanel( 1 );
+		document.body.appendChild( stats.dom );
+		
+        // --- INITIALISATION DE LA SCENE ET DE LA CAMERA ---
+		const scene = new THREE.Scene();
+		const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.5, 10000);
+		const renderer = new THREE.WebGLRenderer({antialias:true});
+		const textureLoader = new THREE.TextureLoader();
+		const sprite = textureLoader.load('https://threejs.org/examples/textures/sprites/circle.png');
+		scene.background = new THREE.Color(0x000000);
+
+		let pointMaterial = new THREE.PointsMaterial({
+				color: 0x0000ff,
+				size: 100,       
+				map: sprite,
+				transparent: true,
+				sizeAttenuation: false, // Désactiver la diminution avec la distance
+			});
+		// Ajuste la taille du rendu et l'attache au document
+		renderer.setSize(window.innerWidth, window.innerHeight);
+		document.body.appendChild(renderer.domElement);
+		
+		const controls = new THREE.OrbitControls(camera, renderer.domElement);
+		controls.enableDamping = true;
+		controls.dampingFactor = 0.02;
+		controls.screenSpacePanning = false;
+		controls.maxPolarAngle = Math.PI / 2; // Empêche la caméra de passer sous la scène
+
+        // --- PARAMÈTRES GLOBAUX ---
+		const theta = 0.4; // Seuil d'approximation de Barnes-Hut
+		const numBodies = 500; // Nombre d'étoiles (réduis pour debug si besoin)
+
+
+
+			
+		const width=50; // profondeur largeur hauteur de la répartition des particules 
+		const height=20;
+		const depth=50;
+		const coefsize=1; // constante multiplicatrice pour la taille de l'octree
+		
+		const permitivity=8.9*10**(-12); //permitivité diélectrique du vide 
+		const permeability=1.2*10e-6; //permeabilité du vide
+		const pi=3.1415;
+		const me=10e-30; // masse d'un electron (valeurs de test)
+		const mp=10e-30; // masse s'un proton
+		const qe=10e-19; // charge elementaire (valeur d'échelle)
+
+		const B0=10; // champ toroïdal de base (échelle)
+		const Ip=1e7; // courant plasma (échelle)
+
+		const coefvitesse1=1e8; // constante multiplicatrice pour la vitesse initiale 
+		
+		const celerite = 1e9; //vitesse de la lumière (échelle: garder >> vitesses sim)
+		
+		let R= width*0.4 ;
+		let r= R/2;
+
+
+		// --- CLASSE Octree ---
+
+		class Octree {
+			constructor(boundary, capacity) {
+				this.boundary = boundary; // {x,y,z,w,h,d} 
+				this.capacity = capacity;
+				this.bodies = [];
+				this.divided = false;
+				this.charge = 0;
+				this.vx=0;
+				this.vy=0;
+				this.vz=0;
+				this.ax=0;
+				this.ay=0;
+				this.az=0;
+				this.centerChargeX = 0;
+				this.centerChargeY = 0;
+				this.centerChargeZ = 0;
+				// dipole moment fallback
+				this.dipoleX = 0;
+				this.dipoleY = 0;
+				this.dipoleZ = 0;
+			}
+				insert(body) {
+				if (!this.contains(body)) return false;
+					if (this.bodies.length < this.capacity && !this.divided) {
+					this.bodies.push(body);
+					this.updateCenterCharge();
+					return true;
+				}
+				if (!this.divided) {
+					this.subdivide();
+				}
+					if (this.northeastfront.insert(body) || this.northwestfront.insert(body) ||
+					this.southeastfront.insert(body) || this.southwestfront.insert(body) || 
+					this.northeastback.insert(body) || this.northwestback.insert(body) ||
+					this.southeastback.insert(body) || this.southwestback.insert(body) || this.divided) {
+					this.updateCenterCharge();
+					return true;
+				}
+					return false;
+			}
+				contains(body) {
+				return (body.x >= this.boundary.x - this.boundary.w && body.x <= this.boundary.x + this.boundary.w &&
+						body.y >= this.boundary.y - this.boundary.h && body.y <= this.boundary.y + this.boundary.h &&
+						body.z >= this.boundary.z - this.boundary.d && body.z <= this.boundary.z + this.boundary.d );
+			}
+				subdivide() {
+				let { x, y, z, w, h, d } = this.boundary;
+				this.northeastfront = new Octree({ x: x + w / 2, y: y + h / 2, z: z + d / 2, w: w / 2, h: h / 2 , d: d/2}, this.capacity);
+				this.northwestfront = new Octree({ x: x - w / 2, y: y + h / 2, z: z + d / 2, w: w / 2, h: h / 2 ,d: d/2 }, this.capacity);
+				this.southeastfront = new Octree({ x: x + w / 2, y: y - h / 2, z: z + d / 2, w: w / 2, h: h / 2 ,d: d/2 }, this.capacity);
+				this.southwestfront = new Octree({ x: x - w / 2, y: y - h / 2, z: z + d / 2, w: w / 2, h: h / 2 ,d: d/2 }, this.capacity);
+				this.northeastback = new Octree({ x: x + w / 2, y: y + h / 2, z: z - d / 2, w: w / 2, h: h / 2 ,d: d/2 }, this.capacity);
+				this.northwestback = new Octree({ x: x - w / 2, y: y + h / 2, z: z - d / 2, w: w / 2, h: h / 2 ,d: d/2 }, this.capacity);
+				this.southeastback = new Octree({ x: x + w / 2, y: y - h / 2, z: z - d / 2, w: w / 2, h: h / 2 ,d: d/2 }, this.capacity);
+				this.southwestback = new Octree({ x: x - w / 2, y: y - h / 2, z: z - d / 2, w: w / 2, h: h / 2 ,d: d/2 }, this.capacity);
+				this.divided = true;
+			}
+				updateCenterCharge() {
+				// On calcule : total signé, total absolu, moments signés et absolus
+				let totalCharge = 0, totalAbsCharge = 0;
+				let cxSigned = 0, cySigned = 0, czSigned = 0;
+				let cxAbs = 0, cyAbs = 0, czAbs = 0;
+				let vxS = 0, vyS = 0, vzS = 0;
+				let axS = 0, ayS = 0, azS = 0;
+				for (let body of this.bodies) {
+					totalCharge += body.charge;
+					totalAbsCharge += Math.abs(body.charge);
+					cxSigned += body.x * body.charge;
+					cySigned += body.y * body.charge;
+					czSigned += body.z * body.charge;
+					cxAbs += body.x * Math.abs(body.charge);
+					cyAbs += body.y * Math.abs(body.charge);
+					czAbs += body.z * Math.abs(body.charge);
+					vxS += body.vx * body.charge;
+					vyS += body.vy * body.charge;
+					vzS += body.vz * body.charge;
+					axS += body.ax * body.charge;
+					ayS += body.ay * body.charge;
+					azS += body.az * body.charge;
+				}
+					const tinyQ = 1e-30;
+				if (Math.abs(totalCharge) > tinyQ) {
+					// centre pondéré par la charge signée (monopole)
+					this.charge = totalCharge;
+					this.centerChargeX = cxSigned / totalCharge;
+					this.centerChargeY = cySigned / totalCharge;
+					this.centerChargeZ = czSigned / totalCharge;
+					this.vx = vxS / totalCharge;
+					this.vy = vyS / totalCharge;
+					this.vz = vzS / totalCharge;
+					this.ax = axS / totalCharge;
+					this.ay = ayS / totalCharge;
+					this.az = azS / totalCharge;
+				} else {
+					// fallback : quand la charge nette est ~0, on garde une position représentative
+					this.charge = 0;
+					if (totalAbsCharge > 0) {
+						this.centerChargeX = cxAbs / totalAbsCharge;
+						this.centerChargeY = cyAbs / totalAbsCharge;
+						this.centerChargeZ = czAbs / totalAbsCharge;
+					} else {
+						// si pas de charge (rare), on centre sur la boîte
+						this.centerChargeX = this.boundary.x;
+						this.centerChargeY = this.boundary.y;
+						this.centerChargeZ = this.boundary.z;
+					}
+					this.vx = 0; this.vy = 0; this.vz = 0;
+					this.ax = 0; this.ay = 0; this.az = 0;
+				}
+					// calcule moment dipolaire (par rapport au centre de référence ci-dessus)
+				let centerRefX = this.centerChargeX;
+				let centerRefY = this.centerChargeY;
+				let centerRefZ = this.centerChargeZ;
+				this.dipoleX = 0; this.dipoleY = 0; this.dipoleZ = 0;
+				for (let body of this.bodies) {
+					this.dipoleX += body.charge * (body.x - centerRefX);
+					this.dipoleY += body.charge * (body.y - centerRefY);
+					this.dipoleZ += body.charge * (body.z - centerRefZ);
+				}
+			}
+		}
+		// ---Calcul matriciel---
+		function scal(A,B){
+			return A.x*B.x+A.y*B.y+A.z*B.z;
+		}
+		function vect(A,B){
+			return {x:A.y*B.z-A.z*B.y,y:B.x*A.z-B.z*A.x,z:A.x*B.y-A.y*B.x};
+		}
+		function hom(h,A){
+			return {x:h*A.x,y:h*A.y,z:h*A.z};
+		}
+		function sum(A,B){
+			return {x:B.x+A.x,y:A.y+B.y,z:B.z+A.z};
+		}
+
+		// --- FONCTION POUR CALCULER LA FORCE (avec fallback dipôle) ---
+		function computeField(body, node) {
+			if (!node || node.bodies.length == 0) return { x: 0, y: 0, z: 0, k: 0, l: 0, m: 0};
+
+			let dx = node.centerChargeX - body.x;
+			let dy = node.centerChargeY - body.y;
+			let dz = node.centerChargeZ - body.z;
+			let dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+			const epsR = 1e-10;
+			dist = Math.max(dist, epsR);
+
+			// pas d'auto-force
+			if (node.bodies.length === 1 && node.bodies[0] === body) {
+				return { x: 0, y: 0, z: 0, k: 0, l: 0, m: 0}
+			}
+
+			if (node.bodies.length === 1 || (node.boundary.w / dist) < theta) {
+				let n = { x: dx/dist, y: dy/dist, z: dz/dist };
+				let v = { x: node.vx, y: node.vy, z: node.vz };
+				let vbody = { x: body.vx, y: body.vy, z: body.vz };
+				let a = { x: node.ax, y: node.ay, z: node.az };
+
+				//beta = v/c (source)
+				let beta = { x: v.x / celerite, y: v.y / celerite, z: v.z / celerite };
+				let betasq = 0
+				
+				let lorentz = 1 ;
+
+
+				let one_minus_n_dot_beta = 1 - scal(n, beta);
+				const minDen = 1e-10;
+				if (Math.abs(one_minus_n_dot_beta) < minDen) {
+					one_minus_n_dot_beta = (one_minus_n_dot_beta < 0 ? -minDen : minDen);
+				}
+
+				// monopole Liénard–Wiechert like
+				let denom1 = 4 * Math.PI * permitivity * dist * dist * ( lorentz* lorentz) * (one_minus_n_dot_beta**3);
+				let denom2 = 4 * Math.PI * permitivity * (celerite*celerite) * dist * (one_minus_n_dot_beta**3);
+
+				let n_minus_beta = sum(n, hom(-1, beta));
+				let T1 = hom(node.charge / Math.max(denom1, 1e-10), n_minus_beta);
+				let T2vec = vect(n, vect(n_minus_beta, a));
+				let T2 = hom(node.charge / Math.max(denom2, 1e-10), T2vec);
+
+				let E = sum(T1, T2);
+				E = hom(0e1/numBodies,E);
+
+				
+
+				// Si la charge nette du noeud est quasi nulle => fallback dipôle statique
+				const smallQ = 1e-25;
+				if (Math.abs(node.charge) < smallQ) {
+					const p = {x: node.dipoleX, y: node.dipoleY, z: node.dipoleZ};
+					const pMag = Math.hypot(p.x, p.y, p.z);
+					if (pMag > 1e-30) {
+						// Champ dipolaire statique : E_dip = (1/(4πε0)) * (1/r^3) * (3(n·p) n - p)
+						const pdotn = scal(p, n);
+						const pref = 1 / (4 * Math.PI * permitivity);
+						const rr3 = Math.max(dist*dist*dist, epsR*epsR*epsR);
+						const term1 = hom(3 * pdotn, n);
+						const term2 = hom(-1, p);
+						const dip = hom(pref / rr3, sum(term1, term2));
+						// on ajoute le dipôle au champ E (remplace quasiment T1/T2 quand Q~0)
+						E = sum(E, dip);
+					}
+				}
+
+				// champ B approx
+				let B = hom(1 / celerite, vect(n, E));
+
+
+				if (!isFinite(E.x) || !isFinite(E.y) || !isFinite(E.z)) {
+					return { x: 0, y: 0, z: 0, k: 0, l :0, m: 0};
+				}
+
+
+				return { x: E.x, y: E.y, z: E.z, k: B.x, l: B.y, m: B.z };
+			}
+
+			// sinon descente récursive
+			let F1 = computeField(body, node.northeastfront);
+			let F2 = computeField(body, node.northwestfront);
+			let F3 = computeField(body, node.southeastfront);
+			let F4 = computeField(body, node.southwestfront);
+			let F5 = computeField(body, node.northeastback);
+			let F6 = computeField(body, node.northwestback);
+			let F7 = computeField(body, node.southeastback);
+			let F8 = computeField(body, node.southwestback);
+
+			return {
+				x: F1.x + F2.x + F3.x + F4.x + F5.x + F6.x + F7.x + F8.x,
+				y: F1.y + F2.y + F3.y + F4.y + F5.y + F6.y + F7.y + F8.y,
+				z: F1.z + F2.z + F3.z + F4.z + F5.z + F6.z + F7.z + F8.z,
+				k: F1.k + F2.k + F3.k + F4.k + F5.k + F6.k + F7.k + F8.k,
+				l: F1.l + F2.l + F3.l + F4.l + F5.l + F6.l + F7.l + F8.l,
+				m: F1.m + F2.m + F3.m + F4.m + F5.m + F6.m + F7.m + F8.m
+			};
+		}
+
+		function FieldExt(body){
+			// calcul robuste du champ magnétique du tokamak approximé
+			const eps = 1e-6;
+			let phi = Math.atan2(body.z, body.x); 
+			let Rp = Math.hypot(body.x, body.z);
+			Rp = Math.max(Rp, eps);
+
+			const r_eff = Math.hypot(body.y, Rp - R);
+			if (r_eff < eps) return { fx: 0, fy: 0, fz: 0 };
+
+			let vbody = {x: body.vx, y: body.vy, z: body.vz};
+			let qbody = body.charge;
+
+			let Btoro = hom(B0 * R / Rp, {x: -Math.sin(phi), y: 0, z: Math.cos(phi)});
+
+			let vec = {x: body.x * (Rp - R) / Rp, y: body.y, z: body.z * (Rp - R) / Rp};
+			let normVec = Math.sqrt(scal(vec, vec));
+			let denom = 2 * pi * r_eff * Math.max(normVec, eps);
+			let Bpolo = {x:0,y:0,z:0};
+			if (isFinite(denom) && denom > 0) {
+				Bpolo = hom(permeability * Ip / denom, vect({x:-Math.sin(phi), y:0, z:Math.cos(phi)}, vec));
+			}
+			let Btot = sum(Bpolo, Btoro);
+			return Btot;
+		}
+		// cR2ATION DES PARTICULES 
+
+		let etoilesVisibles = true;
+		const bodies = []; 
+		const etoiles = []; 
+
+		let pointGeometry = new THREE.BufferGeometry();
+
+		for (let i = 0; i < numBodies; i++) { 
+
+			let charge = qe;
+			let mass = mp;
+			if (i % 2 < 0.5) { charge = -qe; mass = me }
+
+			const th = Math.random() * 2 * Math.PI, ph = Math.random() * 2 * Math.PI;
+			const rad = r * (0.1 + 0.03 * Math.random());
+			const x = (R + rad * Math.cos(th)) * Math.cos(ph);
+			const y = rad * Math.sin(th);
+			const z = (R + rad * Math.cos(th)) * Math.sin(ph);
+
+			// vitesse initiale (circuit autour de l'axe)
+			let vx = -coefvitesse1 * Math.sin(ph);
+			let vy = 0;
+			let vz = coefvitesse1 * Math.cos(ph);
+			if (charge <= 0) {vx*=-1;vz*=-1}
+			bodies.push({
+				x: x,
+				y: y,
+				z: z,
+				vx: vx,
+				vy: vy,
+				vz: vz,
+				ax: 0,
+				ay: 0,
+				az: 0,
+				charge: charge,
+				mass: mass,
+				lorentz:1 
+			});
+
+			// Attribution du matériau en fonction du type de particule (charge)
+			let color;
+			if (charge < 0) {
+			color = 0xff0000; // électron = rouge
+			} else {
+			color = 0x0000ff; // proton = bleu
+			}
+
+			pointMaterial = new THREE.PointsMaterial({
+			color: color,
+			size: 5,
+			map: sprite,
+			transparent: true,
+			opacity: 1,
+			sizeAttenuation: false,
+			});
+
+			let pointPosition = new Float32Array([x, y, z]);
+			pointGeometry.setAttribute('position', new THREE.BufferAttribute(pointPosition, 3));
+			let point = new THREE.Points(pointGeometry, pointMaterial);
+			etoiles.push(point);
+			scene.add(point);
+		}
+
+		// --- collisions cloud (optimisé) ---
+		const colisions = [];
+		const numColisions = 1000;
+		let compteurColisions=0;
+
+		for (let i = 0; i < numColisions; i++) { 
+
+
+			let pointPosition = new Float32Array([0,0,0]);
+			pointGeometry.setAttribute('position', new THREE.BufferAttribute(pointPosition, 3));
+			let ec = new THREE.Points(pointGeometry, new THREE.PointsMaterial({color: 0x00ff00, size: 2, opacity: 1,  sizeAttenuation: false}));
+			colisions.push(ec)
+			scene.add(ec);
+
+		}
+
+		function update_colisions(body){
+			let indice=compteurColisions%numColisions;
+			let last=colisions[indice];
+			last.position.set(body.x,body.y,body.z)
+			compteurColisions+=1;
+		}
+		// --- trajectoire---
+		const trajectoire = [];
+		const numTrajectoire=1000;
+		let compteurTrajectoire=0;
+
+		for (let i = 0; i < 2*numTrajectoire; i++) { 
+
+			let pointPosition = new Float32Array([0,0,0]);
+			pointGeometry.setAttribute('position', new THREE.BufferAttribute(pointPosition, 3));
+			if(i%2===0){
+				let et = new THREE.Points(pointGeometry, new THREE.PointsMaterial({color: 0xf5aa42, size: 2, opacity: 0,  sizeAttenuation: false}));
+				trajectoire.push(et)
+				scene.add(et);
+			}
+			else{
+				let et = new THREE.Points(pointGeometry, new THREE.PointsMaterial({color: 0x00ffff, size: 2, opacity: 0,  sizeAttenuation: false}));
+				trajectoire.push(et)
+				scene.add(et);
+			}
+		}
+
+		function update_trajectoire(){
+			let indice=compteurTrajectoire%numTrajectoire;
+			let last0=trajectoire[indice];
+			let last1=trajectoire[indice+1];
+			last0.position.set(bodies[0].x,bodies[0].y,bodies[0].z);
+			last1.position.set(bodies[1].x,bodies[1].y,bodies[1].z);
+			compteurTrajectoire+=2;
+		}
+
+			
+		// --- FONCTION DE SIMULATION ---
+		function update(dt) {
+			let octree = new Octree({ x: 0, y: 0, z: 0, w: coefsize*width, h: coefsize*height, d: coefsize*depth }, 4);
+
+			for (let body of bodies) {octree.insert(body);}
+			let vmax=0;
+			for (let body of bodies) { 
+
+				let F = computeField(body, octree);
+				let E = {x: F.x, y: F.y, z: F.z};
+				let B = {x: F.k, y: F.l, z: F.m};
+				let Bext = FieldExt(body);
+				let Btot={x:B.x+Bext.x,y:B.y+Bext.y,z:B.z+Bext.z};
+				let lorentz=body.lorentz;
+
+				let copyBody={
+					x: body.x + dt*body.vx,
+					y: body.y + dt*body.vy,
+					z: body.z + dt*body.vz,
+					vx: body.vx + dt*body.ax,
+					vy: body.vy + dt*body.ay,
+					vz: body.vz + dt*body.az,
+					ax: body.ax,
+					ay: body.ay,
+					az: body.az,
+					charge: body.charge,
+					mass: body.mass,
+					lorentz: 1 
+				}
+
+				let Fi = computeField(copyBody, octree);
+				let Ei = {x: Fi.x, y: Fi.y, z: Fi.z};
+				let Bi = {x: Fi.k, y: Fi.l, z: Fi.m};
+				let Bexti = FieldExt(copyBody);
+				let Btoti={x:Bi.x+Bexti.x,y:Bi.y+Bexti.y,z:Bi.z+Bexti.z};
+				let lorentzi=copyBody.lorentz;
+
+				let k=0.5*dt*body.charge/body.mass;
+				let A= (lorentzi*lorentz)/(lorentzi*lorentzi+k*scal(Btoti,Btoti));
+
+				
+
+				let a =  (1+k*k*Btoti.x*Btoti.x/(lorentzi*lorentzi)); let b = (k*Btoti.z/lorentzi + k*k*Btoti.x*Btoti.y/(lorentzi*lorentzi)); let c = (-k*Btoti.y/lorentzi + k*k*Btoti.x*Btoti.z/(lorentzi*lorentzi));
+				let d = (-k*Btoti.z/lorentzi + k*k*Btoti.x*Btoti.y/(lorentzi*lorentzi)); let e = (1+k*k*Btoti.y*Btoti.y/(lorentzi*lorentzi)); let f = (k*Btoti.x/lorentzi + k*k*Btoti.y*Btoti.z/(lorentzi*lorentzi));
+				let g = (k*Btoti.y/lorentzi + k*k*Btoti.x*Btoti.z/(lorentzi*lorentzi)); let h = (-k*Btoti.x/lorentzi + k*k*Btoti.y*Btoti.z/(lorentzi*lorentzi)); let i=(1+k*k*Btoti.z*Btoti.z/(lorentzi*lorentzi));
+
+
+				let alpha =  a - k*Btot.z*b/lorentz + k*Btot.y*c/lorentz; let beta = k*Btot.z*a/lorentz +  b - k*Btot.x*c/lorentz; let gamma = -k*Btot.y*a/lorentz + k*Btot.x*b/lorentz +  c;
+				let delta =  d - k*Btot.z*e/lorentz + k*Btot.y*f/lorentz; let epsilon = k*Btot.z*d/lorentz +  e - k*Btot.x*f/lorentz; let ksi = -k*Btot.y*d/lorentz + k*Btot.x*e/lorentz +  f;
+				let nu =  g - k*Btot.z*h/lorentz + k*Btot.y*i/lorentz; let theta = k*Btot.z*g/lorentz +  h - k*Btot.x*i/lorentz; let iota = -k*Btot.y*g/lorentz + k*Btot.x*h/lorentz +  i;
+
+
+
+				let kappa = a*(E.x+Ei.x) + b*(E.y+Ei.y) + c*(E.z+Ei.z);
+				let lambda = d*(E.x+Ei.x) + e*(E.y+Ei.y) + f*(E.z+Ei.z);
+				let mu = g*(E.x+Ei.x) + h*(E.y+Ei.y) + i*(E.z+Ei.z);
+
+
+
+
+                let vx=body.vx;let vy=body.vy; let vz=body.vz;    
+
+
+				body.vx = A*(alpha*vx + beta*vy + gamma*vz) + A*k*kappa;
+				body.vy = A*(delta*vx + epsilon*vy + ksi*vz) + A*k*lambda;
+				body.vz = A*(nu*vx + theta*vy + iota*vz) + A*k*mu;
+
+				let vbody={x:body.vx,y:body.vy,z:body.vz};
+				let vsquare = scal(vbody,vbody);
+
+				if(Math.sqrt(vsquare)>celerite){
+					vbody=hom(celerite*0.999999/Math.sqrt(vsquare),vbody);
+					body.vx=vbody.x;
+					body.vy=vbody.y;
+					body.vz=vbody.z;
+				}
+				vsquare=scal(vbody,vbody);
+
+				body.x += body.vx*dt;
+				body.y += body.vy*dt;
+				body.z += body.vz*dt;
+
+                body.ax=(body.vx-vx)/dt;
+				body.ay=(body.vy-vy)/dt;
+				body.az=(body.vz-vz)/dt;
+
+                if (Math.random() < 0.0001) {
+					console.warn("A:",A,"k:",k,"lorentz:",lorentz,lorentzi)
+                    console.warn("Btot:",Btot,"Btoti:",Btoti,"E:",E,"Ei",Ei)
+                    console.warn(alpha,beta,gamma)
+                    console.warn(delta,epsilon,ksi)
+                    console.warn(nu,theta,iota)
+                    console.warn(kappa,lambda,mu)
+                    console.warn(body.vx,vx)
+					console.warn(body.ax,body.ay,body.az);
+					console.warn("-----------")
+				}
+
+
+
+				//if(Math.random()<0.001){console.log(gamma,body.x,body.z,Math.hypot(body.x, body.z));}
+
+				const Rp = Math.hypot(body.x, body.z);
+				const r_eff = Math.hypot(body.y, Rp - R);
+
+				if (r_eff >= r){
+					update_colisions(body);
+
+					const depassement = r_eff - r;
+					
+					// normale au tore 
+					let nx =(body.x / Math.max(Rp,1e-9)) * (Rp - R);
+					let ny = body.y;
+					let nz = (body.z / Math.max(Rp,1e-9)) * (Rp - R);
+					const norm = Math.hypot(nx, ny, nz);
+					if (norm > 1e-9) { nx /= norm; ny /= norm; nz /= norm; }
+				
+					// replace le point sur la paroi 
+					body.x -= nx * depassement;
+					body.y -= ny * depassement;
+					body.z -= nz * depassement;
+					
+					// réflexion élastique
+					const dot = body.vx * nx + body.vy * ny + body.vz * nz;
+					body.vx -= 2* dot * nx;
+					body.vy -= 2* dot * ny;
+					body.vz -= 2* dot * nz;
+				}
+
+
+				body.lorentz=1 ;
+				
+
+
+				if(vsquare>vmax*vmax){vmax=Math.sqrt(vsquare);}         
+			}
+
+			
+			update_trajectoire();
+			return vmax;
+		}
+			
+		// --- FONCTION DE RENDU ---
+		function render() {
+			for(let q=0; q<numBodies;q++){
+				etoiles[q].position.set(bodies[q].x,bodies[q].y,bodies[q].z);
+			}
+		}
+
+			// Positionner la caméra 
+		camera.position.z = 0;
+		camera.position.x = 50;
+		camera.position.y = 50;
+		camera.lookAt(0,0,0);
+
+			// --- BOUCLE D'ANIMATION ---
+		let lastTime = performance.now();
+
+		function animate() {
+			requestAnimationFrame(animate);
+			const now = performance.now();
+			let deltaTime = 1e-10 ;
+			lastTime = now;
+
+			let vmax = update(deltaTime);
+			let taux_vitesse_lumière = 100 * vmax / celerite;
+
+			render();
+
+
+			renderer.render(scene, camera);	
+			stats.update();
+		}
+		const option1 = document.getElementById('toggleVisibility');
+    	const statusText = document.getElementById("statusText");
+		option1.addEventListener("change", () => {
+			statusText.textContent = option1.checked ? "Option activée" : "Option désactivée";
+
+			etoilesVisibles = !etoilesVisibles;
+			for (let i = 0; i < etoiles.length; i++) {
+				if (i === 0 || i === 1) {
+					etoiles[i].material.opacity = 1; // rouge et bleu toujours visibles
+				} else {
+					etoiles[i].material.opacity = etoilesVisibles ? 1 : 0;
+				}
+			}
+			
+		});	
+		animate();
+    </script>
+</body>
+</html>
