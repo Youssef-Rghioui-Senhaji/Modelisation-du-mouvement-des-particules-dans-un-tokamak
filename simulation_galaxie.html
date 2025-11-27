@@ -114,7 +114,7 @@
 
     <div class="range-container">
         <label for="slider_Bext">Valeur du champ Bext :</label><br>
-        <input type="range" id="slider_Bext" class="slider-steps" min="0" max="100" step="1" value="10">
+        <input type="range" id="slider_Bext" class="slider-steps" min="0" max="100" step="1" value="50">
     <span id="val_Bext">10</span>
     </div>
 
@@ -182,7 +182,7 @@
 		const mp=10e-30; // masse s'un proton
 		const qe=10e-19; // charge elementaire (valeur d'échelle)
 
-		let B0=10; // champ toroïdal de base (échelle)
+		let B0=0; // champ toroïdal de base (échelle)
 		const Ip=1e7; // courant plasma (échelle)
 
 		const coefvitesse1=1e8; // constante multiplicatrice pour la vitesse initiale 
@@ -432,7 +432,7 @@
 
 		function FieldExt(body){
 			// calcul robuste du champ magnétique du tokamak approximé
-			const eps = 1e-6;
+			const eps = 1e-4;
 			let phi = Math.atan2(body.z, body.x); 
 			let Rp = Math.hypot(body.x, body.z);
 			Rp = Math.max(Rp, eps);
@@ -712,7 +712,7 @@
 				let lorentzi=copyBody.lorentz;
 
 				let k=0.5*dt*body.charge/body.mass;
-				let A= 1/(lorentzi*lorentzi+k*scal(Btoti,Btoti));
+				let A= 1/(lorentzi*lorentzi+k*k*scal(Btoti,Btoti));
 
 				
 
@@ -727,9 +727,9 @@
 
 
 
-				let kappa = k*a*(E.x+Ei.x) + k*b*(E.y+Ei.y) + k*c*(E.z+Ei.z);
-				let lambda = k*d*(E.x+Ei.x) + k*e*(E.y+Ei.y) + k*f*(E.z+Ei.z);
-				let mu = k*g*(E.x+Ei.x) + k*h*(E.y+Ei.y) + k*i*(E.z+Ei.z);
+				let kappa = a*(E.x+Ei.x) + b*(E.y+Ei.y) + c*(E.z+Ei.z);
+				let lambda = d*(E.x+Ei.x) + e*(E.y+Ei.y) + f*(E.z+Ei.z);
+				let mu = g*(E.x+Ei.x) + h*(E.y+Ei.y) + i*(E.z+Ei.z);
 
 
 
