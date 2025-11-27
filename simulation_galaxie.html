@@ -440,5 +440,100 @@
             }
             return maxV;
         }
+        // ==========================================
+        // 5. RENDU ET BOUCLE PRINCIPALE
+        // ==========================================
 
+        const positions = new Float32Array(PARAMS.numParticles * 3);
+        const colors = new Float32Array(PARAMS.numParticles * 3);
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        // Texture sprite pour particules rondes
+        const loader = new THREE.TextureLoader();
+        const sprite = loader.load('https://threejs.org/examples/textures/sprites/disc.png');
+
+        const material = new THREE.PointsMaterial({
+            size: 1.5,
+            map: sprite,
+            vertexColors: true,
+            alphaTest: 0.5,
+            transparent: true
+        });
+
+        const points = new THREE.Points(geometry, material);
+        scene.add(points);
+
+        // GUI Setup
+        const gui = new dat.GUI();
+        const fSim = gui.addFolder('Simulation Params');
+        fSim.add(PARAMS, 'dt', 0, 1e-10).name('Time Step (s)');
+        fSim.add(PARAMS, 'paused').name('Pause');
+        fSim.open();
+
+        const fPhy = gui.addFolder('Tokamak Physics');
+        fPhy.add(PARAMS, 'B0', 0, 10).name('Champ B (T)');
+        fPhy.add(PARAMS, 'Ip', 1e5, 2e6).name('Courant Ip (A)');
+        fPhy.open();
+
+        const fInt = gui.addFolder('Interactions (L-W)');
+        fInt.add(PARAMS, 'WEIGHT', 1e5, 1e8).name('Poids Macro');
+        fInt.add(PARAMS, 'interStrength', 0.0, 5.0).step(0.1).name('Coulomb Str.');
+        fInt.add(PARAMS, 'softening', 0.1, 2.0).name('Softening');
+        fInt.open();
+
+        gui.add({ reset: () => {
+            initParticles();
+            syncBuffers();
+        }}, 'reset').name('RESTART SYSTEM');
+
+        // Initialisation avant la boucle !
+        initParticles();
+        syncBuffers();
+
+        function syncBuffers() {
+            for (let i = 0; i < PARAMS.numParticles; i++) {
+                const p = particles[i];
+                positions[i*3] = p.x;
+                positions[i*3+1] = p.y;
+                positions[i*3+2] = p.z;
+                colors[i*3] = p.color[0];
+                colors[i*3+1] = p.color[1];
+                colors[i*3+2] = p.color[2];
+            }
+            geometry.attributes.position.needsUpdate = true;
+            geometry.attributes.color.needsUpdate = true;
+            document.getElementById('pCount').innerText = PARAMS.numParticles;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            stats.begin();
+            controls.update();
+
+            let vMax = 0;
+            if (!PARAMS.paused) {
+                vMax = updatePhysics();
+                syncBuffers();
+            }
+
+            document.getElementById('vMaxDisplay').innerText = ((vMax/CONSTANTS.c)*100).toFixed(2);
+            
+            renderer.render(scene, camera);
+            stats.end();
+        }
+
+        animate();
+
+        // Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+    </script>
+</body>
+</html>
 
