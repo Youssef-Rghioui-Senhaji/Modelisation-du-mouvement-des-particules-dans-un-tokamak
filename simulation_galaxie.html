@@ -192,4 +192,253 @@
                 }
             }
         }
+        // ==========================================
+        // 4. MOTEUR PHYSIQUE
+        // ==========================================
+
+        let particles = [];
+
+        function initParticles() {
+            particles = [];
+            for (let i = 0; i < PARAMS.numParticles; i++) {
+                // Génération aléatoire dans le volume du tore
+                const theta = Math.random() * Math.PI * 2; // Angle poloïdal
+                const phi = Math.random() * Math.PI * 2;   // Angle toroïdal
+                
+                // Concentration gaussienne autour du petit rayon (0.5 * r_min)
+                const r = (Math.random() + Math.random()) * 0.5 * PARAMS.r_min; 
+
+                const R = PARAMS.R_maj + r * Math.cos(theta);
+                const x = R * Math.cos(phi);
+                const y = r * Math.sin(theta);
+                const z = R * Math.sin(phi);
+
+                // Espèce (50/50)
+                const isIon = Math.random() > 0.5;
+                const m = isIon ? CONSTANTS.mp : CONSTANTS.me;
+                const q = isIon ? CONSTANTS.qe : -CONSTANTS.qe;
+
+                // Vitesse thermique (approximation)
+                const vTh = 2e6 / Math.sqrt(m / CONSTANTS.mp); // Électrons plus rapides
+                let vx = (Math.random() - 0.5) * vTh;
+                let vy = (Math.random() - 0.5) * vTh;
+                let vz = (Math.random() - 0.5) * vTh;
+
+                // Ajout d'une vitesse de dérive pour suivre le champ (current drive)
+                // v_drift dans le sens toroidal (-sin(phi), 0, cos(phi))
+                const vDrift = 5e5; 
+                const sign = (q > 0) ? 1 : -1; // Ions et électrons vont en sens inverse
+                vx -= Math.sin(phi) * vDrift * sign;
+                vz += Math.cos(phi) * vDrift * sign;
+
+                particles.push({
+                    x, y, z, vx, vy, vz,
+                    q, m,
+                    color: isIon ? [0.2, 0.6, 1.0] : [1.0, 0.3, 0.3] // Bleu (Ions), Rouge (Electrons)
+                });
+            }
+        }
+
+        // Champ Magnétique du Tokamak (Analytique)
+        function getTokamakB(x, y, z) {
+            const R_sq = x*x + z*z;
+            const R_local = Math.sqrt(R_sq); // Distance à l'axe Z
+            
+            // 1. Champ Toroïdal (décroit en 1/R)
+            // B_phi dirigé selon (-sin phi, 0, cos phi)
+            const Bt_mag = (PARAMS.B0 * PARAMS.R_maj) / Math.max(R_local, 0.1);
+            const invR = 1/Math.max(R_local, 0.01);
+            const tx = -z * invR; // -sin(phi)
+            const tz = x * invR;  // cos(phi)
+            
+            const Btx = Bt_mag * tx;
+            const Bty = 0;
+            const Btz = Bt_mag * tz;
+
+            // 2. Champ Poloïdal (créé par le courant plasma Ip)
+            // Simplification: Fil circulaire centré en R_maj
+            const r_pol_sq = (R_local - PARAMS.R_maj)**2 + y*y;
+            const r_pol = Math.sqrt(r_pol_sq);
+            
+            // B_pol tourne autour de l'axe magnétique
+            const Bp_mag = (CONSTANTS.mu0 * PARAMS.Ip) / (2 * Math.PI * Math.max(r_pol, 0.1));
+            
+            // Vecteur directeur tangent au cercle poloidal
+            // Le vecteur radial local est vec_r = ( (R-Rmaj)*tx_rad, y, (R-Rmaj)*tz_rad )
+            // On veut le vecteur perpendiculaire
+            const sinTheta = y / Math.max(r_pol, 0.01);
+            const cosTheta = (R_local - PARAMS.R_maj) / Math.max(r_pol, 0.01);
+
+            // Bp est perpendiculaire à r_pol et à la direction toroidale
+            // Projection 3D un peu complexe, simplifions par superposition locale
+            // Bp_R = -Bp_mag * sinTheta
+            // Bp_y =  Bp_mag * cosTheta
+            // On projette Bp_R sur x et z
+            const Bp_R = -Bp_mag * sinTheta;
+            
+            const Bpx = Bp_R * (x * invR); // cos(phi)
+            const Bpy = Bp_mag * cosTheta;
+            const Bpz = Bp_R * (z * invR); // sin(phi)
+
+            return { 
+                x: Btx + Bpx, 
+                y: Bty + Bpy, 
+                z: Btz + Bpz 
+            };
+        }
+
+        // Calcul Interactions (Barnes-Hut simplifié Liénard-Wiechert)
+        function computeForces(p, node, theta=0.8) {
+            let Ex = 0, Ey = 0, Ez = 0;
+            // On néglige B_interne pour l'instant pour la stabilité, ou on l'ajoute très faiblement
+            
+            if (node.bodies.length === 0) return {x:0, y:0, z:0};
+
+            const dx = node.com.x - p.x;
+            const dy = node.com.y - p.y;
+            const dz = node.com.z - p.z;
+            const r2 = dx*dx + dy*dy + dz*dz;
+            const r = Math.sqrt(r2);
+            
+            // Softening pour éviter l'explosion à r=0
+            const r_eff = Math.max(r, PARAMS.softening);
+
+            // Critère d'ouverture Barnes-Hut
+            const isFar = (node.boundary.w / r_eff) < theta;
+            const isLeaf = !node.divided;
+
+            if (isFar || isLeaf) {
+                if (isLeaf && node.bodies.length === 1 && node.bodies[0] === p) return {x:0, y:0, z:0};
+                
+                // Charge effective (macro-particules)
+                const Q = node.totalCharge * PARAMS.WEIGHT * PARAMS.interStrength;
+                
+                // Coulomb avec correction relativiste simple (1/r^2)
+                // F = q * E. Ici on retourne E.
+                // E = k * Q / r^2 * u_r
+                const k = 1 / (4 * Math.PI * CONSTANTS.e0);
+                const E_mag = k * Q / (r_eff * r_eff);
+                
+                Ex += E_mag * (dx / r_eff);
+                Ey += E_mag * (dy / r_eff);
+                Ez += E_mag * (dz / r_eff);
+                
+            } else {
+                // Descente récursive
+                const children = [node.nwf, node.nef, node.swf, node.sef, node.nwb, node.neb, node.swb, node.seb];
+                for(let child of children) {
+                    if(child) {
+                        const f = computeForces(p, child, theta);
+                        Ex += f.x; Ey += f.y; Ez += f.z;
+                    }
+                }
+            }
+            return { x: Ex, y: Ey, z: Ez };
+        }
+
+        // Intégrateur BORIS PUSHER (Standard Plasma Physics)
+        function updatePhysics() {
+            const dt = PARAMS.dt;
+            if (dt <= 0) return 0;
+
+            // 1. Construire l'arbre pour les interactions
+            const size = PARAMS.R_maj * 3;
+            const octree = new Octree({x:0,y:0,z:0, w:size, h:size, d:size}, 8);
+            for(let p of particles) octree.insert(p);
+            octree.computeMoments();
+
+            let maxV = 0;
+
+            for (let p of particles) {
+                // A. Calcul des Champs
+                const B_ext = getTokamakB(p.x, p.y, p.z);
+                let E_int = {x:0, y:0, z:0};
+
+                // Si interactions activées
+                if (PARAMS.interStrength > 0) {
+                    E_int = computeForces(p, octree);
+                }
+
+                // B. Boris Algorithm
+                // v(t-1/2) est stocké dans p.vx (approx)
+                
+                // t vector
+                const q_m = p.q / p.m; // Pas de WEIGHT ici (q/m est invariant)
+                const alpha = q_m * dt / 2;
+
+                // E step (half)
+                const vm_x = p.vx + alpha * E_int.x;
+                const vm_y = p.vy + alpha * E_int.y;
+                const vm_z = p.vz + alpha * E_int.z;
+
+                // Calcul gamma (Relativiste) - approximation locale
+                const v2 = vm_x*vm_x + vm_y*vm_y + vm_z*vm_z;
+                const gamma = Math.sqrt(1 + v2/(CONSTANTS.c*CONSTANTS.c)); // Approx
+                
+                // Rotation vector t
+                // t = qB * dt / (2 * m * gamma)
+                const tx = alpha * B_ext.x / gamma;
+                const ty = alpha * B_ext.y / gamma;
+                const tz = alpha * B_ext.z / gamma;
+                const t2 = tx*tx + ty*ty + tz*tz;
+
+                // s vector
+                const s_coeff = 2 / (1 + t2);
+                const sx = s_coeff * tx; 
+                const sy = s_coeff * ty; 
+                const sz = s_coeff * tz;
+
+                // v_prime = v_minus + v_minus x t
+                const vp_x = vm_x + (vm_y * tz - vm_z * ty);
+                const vp_y = vm_y + (vm_z * tx - vm_x * tz);
+                const vp_z = vm_z + (vm_x * ty - vm_y * tx);
+
+                // v_plus = v_minus + v_prime x s
+                const vpl_x = vm_x + (vp_y * sz - vp_z * sy);
+                const vpl_y = vm_y + (vp_z * sx - vp_x * sz);
+                const vpl_z = vm_z + (vp_x * sy - vp_y * sx);
+
+                // Final E step
+                p.vx = vpl_x + alpha * E_int.x;
+                p.vy = vpl_y + alpha * E_int.y;
+                p.vz = vpl_z + alpha * E_int.z;
+
+                // Update Position
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+                p.z += p.vz * dt;
+
+                // Stats
+                const vMag = Math.sqrt(p.vx**2 + p.vy**2 + p.vz**2);
+                if (vMag > maxV) maxV = vMag;
+
+                // C. Gestion des Collisions Paroi (Reset si sort du tore)
+                const R_local = Math.sqrt(p.x*p.x + p.z*p.z);
+                const r_pol = Math.sqrt((R_local - PARAMS.R_maj)**2 + p.y*p.y);
+                
+                // Si la particule sort ou explose (NaN)
+                if (r_pol > PARAMS.r_min || isNaN(p.x)) {
+                    // Rebond Elastique simple (optionnel, ici on remet au bord pour stabilité visuelle)
+                    // Calcul normale
+                    const nx_pol = (R_local - PARAMS.R_maj) / R_local;
+                    const normX = nx_pol * (p.x/R_local);
+                    const normY = p.y / r_pol;
+                    const normZ = nx_pol * (p.z/R_local);
+                    
+                    // Réflexion vitesse: v = v - 2(v.n)n
+                    const vdotn = p.vx*normX + p.vy*normY + p.vz*normZ;
+                    p.vx -= 2 * vdotn * normX;
+                    p.vy -= 2 * vdotn * normY;
+                    p.vz -= 2 * vdotn * normZ;
+                    
+                    // Ramène à l'intérieur
+                    const corr = (r_pol - PARAMS.r_min + 0.05);
+                    p.x -= normX * corr;
+                    p.y -= normY * corr;
+                    p.z -= normZ * corr;
+                }
+            }
+            return maxV;
+        }
+
 
