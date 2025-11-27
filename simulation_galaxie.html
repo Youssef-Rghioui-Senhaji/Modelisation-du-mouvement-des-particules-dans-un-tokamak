@@ -43,18 +43,85 @@
 		input:checked + .slider-switch { background-color: #2ecc71; }
 		input:checked + .slider-switch:before { transform: translateX(30px); }
 
+		 /* --- SLIDERS HORIZONTAUX --- */
+    .range-container { margin: 20px 0; }
+    .range-container input[type="range"] {
+      width: 300px;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 8px;
+      border-radius: 5px;
+      outline: none;
+      cursor: pointer;
+    }
+    .slider-blue { background: #ddd; }
+    .slider-blue::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px; height: 18px;
+      border-radius: 50%; background: #3498db;
+    }
+    .slider-blue::-webkit-slider-thumb:hover { background: #2980b9; }
+
+    .slider-green { background: #c8e6c9; }
+    .slider-green::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 20px; height: 20px;
+      border-radius: 50%; background: #2ecc71;
+      box-shadow: 0 0 8px rgba(46, 204, 113, 0.7);
+    }
+
+    .slider-red { height: 5px; background: #f8d7da; }
+    .slider-red::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      background: #e74c3c; border-radius: 4px;
+    }
+
+    .slider-steps { background: #ddd; }
+    .slider-steps::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px; height: 18px;
+      background: #9b59b6; border-radius: 50%;
+    }
     </style>
 </head>
 <body>
-
-	<div id="cameraInfo" style="position: absolute; top: 10px; left: 100px; color: white; font-size: 25px; background-color: rgba(0, 0, 0, 0.5); padding: 10px;"></div>
-    <canvas id="galaxyCanvas"></canvas>
-	<h1>Trajectoire particule</h1>
+	<h1>Modifications des paramètres et Affichage</h1>
 	<label class="switch">
-		<input type="checkbox" id="toggleVisibility">
-		<span class="slider-switch"></span>
-	</label>
-	<span id="statusText">Option désactivée</span>
+        <input type="checkbox" id="toggleVisibility">
+        <span class="slider-switch"></span>
+    </label>
+    <span id="statusText">Cacher les particules</span>
+
+    <label class="switch">
+        <input type="checkbox" id="Trajpart">
+        <span class="slider-switch"></span>
+    </label>
+    <span id="trajStatusText">Afficher trajectoire des particules</span>
+
+    <label class="switch">
+        <input type="checkbox" id="ToggleCollision">
+        <span class="slider-switch"></span>
+    </label>
+    <span id="collisionStatusText">Afficher les collisions</span>
+
+
+    <div class="range-container">
+        <label for="slider_nb_particules">Nombre de particules :</label><br>
+        <input type="range" id="slider_nb_particules" class="slider-steps" min="100" max="3000" step="100" value="500">
+    <span id="val_nb_particules">500</span>
+    </div>
+
+    <div class="range-container">
+        <label for="slider_Bext">Valeur du champ Bext :</label><br>
+        <input type="range" id="slider_Bext" class="slider-steps" min="0" max="100" step="1" value="10">
+    <span id="val_Bext">10</span>
+    </div>
+
+    <button id="resetButton" style="padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #3498db; color: white; border: none; border-radius: 5px; margin-top: 20px;">
+        Réinitialiser la Simulation (Position uniquement)
+    </button>
+
 	<script>// stats.js - http://github.com/mrdoob/stats.js
 			(function(f,e){"object"===typeof exports&&"undefined"!==typeof module?module.exports=e():"function"===typeof define&&define.amd?define(e):f.Stats=e()})(this,function(){var f=function(){function e(a){c.appendChild(a.dom);return a}function u(a){for(var d=0;d<c.children.length;d++)c.children[d].style.display=d===a?"block":"none";l=a}var l=0,c=document.createElement("div");c.style.cssText="position:fixed;top:0;left:0;cursor:pointer;opacity:0.9;z-index:10000";c.addEventListener("click",function(a){a.preventDefault();
 			u(++l%c.children.length)},!1);var k=(performance||Date).now(),g=k,a=0,r=e(new f.Panel("FPS","#0ff","#002")),h=e(new f.Panel("MS","#0f0","#020"));if(self.performance&&self.performance.memory)var t=e(new f.Panel("MB","#f08","#201"));u(0);return{REVISION:16,dom:c,addPanel:e,showPanel:u,begin:function(){k=(performance||Date).now()},end:function(){a++;var c=(performance||Date).now();h.update(c-k,200);if(c>=g+1E3&&(r.update(1E3*a/(c-g),100),g=c,a=0,t)){var d=performance.memory;t.update(d.usedJSHeapSize/
@@ -98,7 +165,7 @@
 
         // --- PARAMÈTRES GLOBAUX ---
 		const theta = 0.4; // Seuil d'approximation de Barnes-Hut
-		const numBodies = 500; // Nombre d'étoiles (réduis pour debug si besoin)
+		let numBodies = 500; // Nombre d'étoiles (réduis pour debug si besoin)
 
 
 
@@ -115,7 +182,7 @@
 		const mp=10e-30; // masse s'un proton
 		const qe=10e-19; // charge elementaire (valeur d'échelle)
 
-		const B0=10; // champ toroïdal de base (échelle)
+		let B0=10; // champ toroïdal de base (échelle)
 		const Ip=1e7; // courant plasma (échelle)
 
 		const coefvitesse1=1e8; // constante multiplicatrice pour la vitesse initiale 
@@ -124,6 +191,7 @@
 		
 		let R= width*0.4 ;
 		let r= R/2;
+     
 
 
 		// --- CLASSE Octree ---
@@ -372,9 +440,6 @@
 			const r_eff = Math.hypot(body.y, Rp - R);
 			if (r_eff < eps) return { fx: 0, fy: 0, fz: 0 };
 
-			let vbody = {x: body.vx, y: body.vy, z: body.vz};
-			let qbody = body.charge;
-
 			let Btoro = hom(B0 * R / Rp, {x: -Math.sin(phi), y: 0, z: Math.cos(phi)});
 
 			let vec = {x: body.x * (Rp - R) / Rp, y: body.y, z: body.z * (Rp - R) / Rp};
@@ -390,117 +455,222 @@
 		// cR2ATION DES PARTICULES 
 
 		let etoilesVisibles = true;
+		// --- NOUVELLE VARIABLE GLOBALE pour la visibilité de la trajectoire
+		let isTrajectoryVisible = false;
+		// --- FIN NOUVELLE VARIABLE GLOBALE
+
 		const bodies = []; 
 		const etoiles = []; 
+		const colisions = [];
+		const numColisions = 1000;
+		const trajectoire = [];	
+		const numTrajectoire=1000; 
+		let compteurTrajectoire=0;
+        let isCollisionVisible = false; // Initialiser à true (elles sont visibles par défaut)
 
 		let pointGeometry = new THREE.BufferGeometry();
 
-		for (let i = 0; i < numBodies; i++) { 
+		function createBodiesAndEtoiles(numBodies) {
 
-			let charge = qe;
-			let mass = mp;
-			if (i % 2 < 0.5) { charge = -qe; mass = me }
+			bodies.length = 0;
+			etoiles.length = 0;
 
-			const th = Math.random() * 2 * Math.PI, ph = Math.random() * 2 * Math.PI;
-			const rad = r * (0.1 + 0.03 * Math.random());
-			const x = (R + rad * Math.cos(th)) * Math.cos(ph);
-			const y = rad * Math.sin(th);
-			const z = (R + rad * Math.cos(th)) * Math.sin(ph);
+			for (let i = 0; i < numBodies; i++) {
 
-			// vitesse initiale (circuit autour de l'axe)
-			let vx = -coefvitesse1 * Math.sin(ph);
-			let vy = 0;
-			let vz = coefvitesse1 * Math.cos(ph);
-			if (charge <= 0) {vx*=-1;vz*=-1}
-			bodies.push({
-				x: x,
-				y: y,
-				z: z,
-				vx: vx,
-				vy: vy,
-				vz: vz,
-				ax: 0,
-				ay: 0,
-				az: 0,
-				charge: charge,
-				mass: mass,
-				lorentz:1 
-			});
+				let charge = qe;
+				let mass = mp;
+				if (i % 2 < 0.5) { charge = -qe; mass = me }
 
-			// Attribution du matériau en fonction du type de particule (charge)
-			let color;
-			if (charge < 0) {
-			color = 0xff0000; // électron = rouge
-			} else {
-			color = 0x0000ff; // proton = bleu
+				const th = Math.random() * 2 * Math.PI;
+				const ph = Math.random() * 2 * Math.PI;
+				const rad = r * (0.1 + 0.03 * Math.random());
+
+				const x = (R + rad * Math.cos(th)) * Math.cos(ph);
+				const y = rad * Math.sin(th);
+				const z = (R + rad * Math.cos(th)) * Math.sin(ph);
+
+				let vx = -coefvitesse1 * Math.sin(ph);
+				let vy = 0;
+				let vz = coefvitesse1 * Math.cos(ph);
+				if (charge < 0) { vx *= -1; vz *= -1; }
+
+				bodies.push({
+					x, y, z, vx, vy, vz,
+					ax: 0, ay: 0, az: 0,
+					charge, mass, lorentz: 1
+				});
+
+				let color = (charge < 0) ? 0xff0000 : 0x0000ff;
+
+				let geom = new THREE.BufferGeometry();
+				geom.setAttribute(
+					'position',
+					new THREE.BufferAttribute(new Float32Array([x, y, z]), 3)
+				);
+
+				let mat = new THREE.PointsMaterial({
+					color,
+					size: 5,
+					map: sprite,
+					transparent: true,
+					opacity: 1,
+					sizeAttenuation: false
+				});
+
+				let point = new THREE.Points(geom, mat);
+				etoiles.push(point);
+				scene.add(point);
+			}
+		}
+		function createColisions() {
+			for (let c of colisions) { if (c) { scene.remove(c); if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); } }
+			colisions.length = 0;
+			compteurColisions = 0;
+
+			const numColisions = 1000;
+                for (let i = 0; i < numColisions; i++) {
+                    const geom = new THREE.BufferGeometry();
+                    geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0,0,0]), 3));
+                    // MODIFICATION: Utiliser la variable globale
+                    const opacity = isCollisionVisible ? 1 : 0;
+                    const mat = new THREE.PointsMaterial({ color: 0x00ff00, size: 2, opacity: opacity, sizeAttenuation: false });
+                    const p = new THREE.Points(geom, mat);
+                    colisions.push(p);
+                    scene.add(p);
+                }
+        }
+		function createTrajectoire() {
+			// libère s'il y a déjà quelque chose
+			for (let t of trajectoire) { if (t) { scene.remove(t); if (t.geometry) t.geometry.dispose(); if (t.material) t.material.dispose(); } }
+			trajectoire.length = 0;
+			compteurTrajectoire = 0;
+
+			for (let i = 0; i < 2 * numTrajectoire; i++) {
+				const geom = new THREE.BufferGeometry();
+				geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0,0,0]), 3));
+				const color = (i % 2 === 0) ? 0xf5aa42 : 0x00ffff;
+				// IMPORTANT: Opacité à 0 par défaut (sera contrôlée par isTrajectoryVisible)
+				const mat = new THREE.PointsMaterial({ color: color, size: 2, opacity: 0, sizeAttenuation: false }); 
+				const p = new THREE.Points(geom, mat);
+				trajectoire.push(p);
+				scene.add(p);
+			}
+		}
+
+		// --- appeler la création initiale AVANT animate() ---
+		createBodiesAndEtoiles(numBodies);
+		createColisions();
+		createTrajectoire();
+		console.log("APPELED: createBodiesAndEtoiles, createColisions, createTrajectoire");
+		
+		function resetSimulation(numBodies) {
+
+			console.log("RESET");
+
+			// supprimer les étoiles existantes
+			for (let e of etoiles) {
+				scene.remove(e);
+				if (e.geometry) e.geometry.dispose();
+				if (e.material) e.material.dispose();
+			}
+			etoiles.length = 0;
+
+			// supprimer collisions
+			for (let c of colisions) {
+				scene.remove(c);
+				if (c.geometry) c.geometry.dispose();
+				if (c.material) c.material.dispose();
+			}
+			colisions.length = 0;
+			compteurColisions = 0;
+
+			// supprimer trajectoire
+			for (let t of trajectoire) {
+				scene.remove(t);
+				if (t.geometry) t.geometry.dispose();
+				if (t.material) t.material.dispose();
+			}
+			trajectoire.length = 0;
+			compteurTrajectoire = 0;
+            isTrajectoryVisible = false; // Remettre à faux au reset
+            
+			// recréer tout
+			createBodiesAndEtoiles(numBodies);
+			createColisions();     
+			createTrajectoire();  
+            
+            // Appliquer l'état de la checkbox Trajpart après recréation
+            const TrajpartCheckbox = document.getElementById('Trajpart');
+            if (TrajpartCheckbox) {
+                TrajpartCheckbox.checked = false; // Par défaut au reset
+                toggleTrajectoryVisibility(false);
+            }
+
+
+			console.log("RESET DONE");
+		}
+
+
+		function update_trajectoire() {
+            // --- MODIFICATION 1 : Arrêter la création de trace si masquée.
+            if (!isTrajectoryVisible) { 
+                return;
+            }
+            // --- FIN MODIFICATION 1
+
+			// protège si pas assez de corps
+			if (!bodies || bodies.length < 2 || !trajectoire || trajectoire.length === 0) return;
+
+			// longueur réelle du tableau trajectoire (tu avais créé 2 * numTrajectoire)
+			const total = trajectoire.length;
+
+			// indice courant (on boucle bien sur total)
+			const idx = compteurTrajectoire % total;
+			const idxNext = (idx + 1) % total; // wrap sûr
+
+			// positions cibles (protège si bodies[0] ou bodies[1] n'existent pas)
+			const b0 = bodies[0];
+			const b1 = bodies[1];
+			if (!b0 || !b1) return;
+
+			// helper pour écrire soit sur la position de l'Object3D, soit sur la geometry attribute
+			function setPointPosition(pointObj, x, y, z) {
+				if (!pointObj) return;
+				const geom = pointObj.geometry;
+				if (geom && geom.attributes && geom.attributes.position && geom.attributes.position.array) {
+					// si la géométrie contient un seul sommet (cas habituel ici)
+					const arr = geom.attributes.position.array;
+					if (arr.length >= 3) {
+						arr[0] = x;
+						arr[1] = y;
+						arr[2] = z;
+						geom.attributes.position.needsUpdate = true;
+						// si tu as besoin que l'objet Three.js se place aussi (rare), ajuste la position du Points
+						pointObj.position.set(0,0,0);
+						return;
+					}
+				}
+				// fallback : position de l'Object3D
+				pointObj.position.set(x, y, z);
 			}
 
-			pointMaterial = new THREE.PointsMaterial({
-			color: color,
-			size: 5,
-			map: sprite,
-			transparent: true,
-			opacity: 1,
-			sizeAttenuation: false,
-			});
+			// écriture pour les deux points (curr et next)
+			setPointPosition(trajectoire[idx], b0.x, b0.y, b0.z);
+			setPointPosition(trajectoire[idxNext], b1.x, b1.y, b1.z);
+            
+            // NOTE: L'opacité est gérée par toggleTrajectoryVisibility
 
-			let pointPosition = new Float32Array([x, y, z]);
-			pointGeometry.setAttribute('position', new THREE.BufferAttribute(pointPosition, 3));
-			let point = new THREE.Points(pointGeometry, pointMaterial);
-			etoiles.push(point);
-			scene.add(point);
+			// incrémenter de 2 (tu stockes deux positions à la fois)
+			compteurTrajectoire = (compteurTrajectoire + 2) % Number.MAX_SAFE_INTEGER;
 		}
-
-		// --- collisions cloud (optimisé) ---
-		const colisions = [];
-		const numColisions = 1000;
-		let compteurColisions=0;
-
-		for (let i = 0; i < numColisions; i++) { 
-
-
-			let pointPosition = new Float32Array([0,0,0]);
-			pointGeometry.setAttribute('position', new THREE.BufferAttribute(pointPosition, 3));
-			let ec = new THREE.Points(pointGeometry, new THREE.PointsMaterial({color: 0x00ff00, size: 2, opacity: 1,  sizeAttenuation: false}));
-			colisions.push(ec)
-			scene.add(ec);
-
-		}
-
 		function update_colisions(body){
+            if (!isCollisionVisible) {
+                return; 
+            }
 			let indice=compteurColisions%numColisions;
 			let last=colisions[indice];
 			last.position.set(body.x,body.y,body.z)
 			compteurColisions+=1;
-		}
-		// --- trajectoire---
-		const trajectoire = [];
-		const numTrajectoire=1000;
-		let compteurTrajectoire=0;
-
-		for (let i = 0; i < 2*numTrajectoire; i++) { 
-
-			let pointPosition = new Float32Array([0,0,0]);
-			pointGeometry.setAttribute('position', new THREE.BufferAttribute(pointPosition, 3));
-			if(i%2===0){
-				let et = new THREE.Points(pointGeometry, new THREE.PointsMaterial({color: 0xf5aa42, size: 2, opacity: 0,  sizeAttenuation: false}));
-				trajectoire.push(et)
-				scene.add(et);
-			}
-			else{
-				let et = new THREE.Points(pointGeometry, new THREE.PointsMaterial({color: 0x00ffff, size: 2, opacity: 0,  sizeAttenuation: false}));
-				trajectoire.push(et)
-				scene.add(et);
-			}
-		}
-
-		function update_trajectoire(){
-			let indice=compteurTrajectoire%numTrajectoire;
-			let last0=trajectoire[indice];
-			let last1=trajectoire[indice+1];
-			last0.position.set(bodies[0].x,bodies[0].y,bodies[0].z);
-			last1.position.set(bodies[1].x,bodies[1].y,bodies[1].z);
-			compteurTrajectoire+=2;
 		}
 
 			
@@ -542,24 +712,24 @@
 				let lorentzi=copyBody.lorentz;
 
 				let k=0.5*dt*body.charge/body.mass;
-				let A= (lorentzi*lorentz)/(lorentzi*lorentzi+k*scal(Btoti,Btoti));
+				let A= 1/(lorentzi*lorentzi+k*scal(Btoti,Btoti));
 
 				
 
-				let a =  (1+k*k*Btoti.x*Btoti.x/(lorentzi*lorentzi)); let b = (k*Btoti.z/lorentzi + k*k*Btoti.x*Btoti.y/(lorentzi*lorentzi)); let c = (-k*Btoti.y/lorentzi + k*k*Btoti.x*Btoti.z/(lorentzi*lorentzi));
-				let d = (-k*Btoti.z/lorentzi + k*k*Btoti.x*Btoti.y/(lorentzi*lorentzi)); let e = (1+k*k*Btoti.y*Btoti.y/(lorentzi*lorentzi)); let f = (k*Btoti.x/lorentzi + k*k*Btoti.y*Btoti.z/(lorentzi*lorentzi));
-				let g = (k*Btoti.y/lorentzi + k*k*Btoti.x*Btoti.z/(lorentzi*lorentzi)); let h = (-k*Btoti.x/lorentzi + k*k*Btoti.y*Btoti.z/(lorentzi*lorentzi)); let i=(1+k*k*Btoti.z*Btoti.z/(lorentzi*lorentzi));
+				let a =  (1+k*k*Btoti.x*Btoti.x/lorentzi); let b = (k*Btoti.z + k*k*Btoti.x*Btoti.y/lorentzi); let c = (-k*Btoti.y + k*k*Btoti.x*Btoti.z/lorentzi);
+				let d = (-k*Btoti.z + k*k*Btoti.x*Btoti.y/lorentzi); let e = (1+k*k*Btoti.y*Btoti.y/lorentzi); let f = (k*Btoti.x + k*k*Btoti.y*Btoti.z/lorentzi);
+				let g = (k*Btoti.y + k*k*Btoti.x*Btoti.z/lorentzi); let h = (-k*Btoti.x + k*k*Btoti.y*Btoti.z/lorentzi); let i=(1+k*k*Btoti.z*Btoti.z/lorentzi);
 
 
-				let alpha =  a - k*Btot.z*b/lorentz + k*Btot.y*c/lorentz; let beta = k*Btot.z*a/lorentz +  b - k*Btot.x*c/lorentz; let gamma = -k*Btot.y*a/lorentz + k*Btot.x*b/lorentz +  c;
-				let delta =  d - k*Btot.z*e/lorentz + k*Btot.y*f/lorentz; let epsilon = k*Btot.z*d/lorentz +  e - k*Btot.x*f/lorentz; let ksi = -k*Btot.y*d/lorentz + k*Btot.x*e/lorentz +  f;
-				let nu =  g - k*Btot.z*h/lorentz + k*Btot.y*i/lorentz; let theta = k*Btot.z*g/lorentz +  h - k*Btot.x*i/lorentz; let iota = -k*Btot.y*g/lorentz + k*Btot.x*h/lorentz +  i;
+				let alpha =  lorentz*a - k*Btot.z*b + k*Btot.y*c; let beta = k*Btot.z*a +  lorentz*b - k*Btot.x*c/lorentz; let gamma = -k*Btot.y*a + k*Btot.x*b +  lorentz*c;
+				let delta =  lorentz*d - k*Btot.z*e + k*Btot.y*f; let epsilon = k*Btot.z*d +  lorentz*e - k*Btot.x*f/lorentz; let ksi = -k*Btot.y*d + k*Btot.x*e +  lorentz*f;
+				let nu =  lorentz*g - k*Btot.z*h + k*Btot.y*i/lorentz; let theta = k*Btot.z*g +  lorentz*h - k*Btot.x*i/lorentz; let iota = -k*Btot.y*g + k*Btot.x*h +  lorentz*i;
 
 
 
-				let kappa = a*(E.x+Ei.x) + b*(E.y+Ei.y) + c*(E.z+Ei.z);
-				let lambda = d*(E.x+Ei.x) + e*(E.y+Ei.y) + f*(E.z+Ei.z);
-				let mu = g*(E.x+Ei.x) + h*(E.y+Ei.y) + i*(E.z+Ei.z);
+				let kappa = k*a*(E.x+Ei.x) + k*b*(E.y+Ei.y) + k*c*(E.z+Ei.z);
+				let lambda = k*d*(E.x+Ei.x) + k*e*(E.y+Ei.y) + k*f*(E.z+Ei.z);
+				let mu = k*g*(E.x+Ei.x) + k*h*(E.y+Ei.y) + k*i*(E.z+Ei.z);
 
 
 
@@ -646,10 +816,27 @@
 			return vmax;
 		}
 			
-		// --- FONCTION DE RENDU ---
+		// --- FONCTION DE RENDU ---	
+
+		console.log("numBodies =", numBodies, "etoiles =", etoiles.length);
+
 		function render() {
-			for(let q=0; q<numBodies;q++){
-				etoiles[q].position.set(bodies[q].x,bodies[q].y,bodies[q].z);
+			const nb = Math.min(numBodies, etoiles.length);
+			if (nb === 0) return; // rien à afficher encore
+
+			for (let q = 0; q < nb; q++) {
+				const point = etoiles[q];
+				if (!point) continue;
+				const geom = point.geometry;
+				if (!geom || !geom.attributes || !geom.attributes.position) continue;
+				const pos = geom.attributes.position.array;
+				// sécurité si bodies pas encore prêt
+				const b = bodies[q];
+				if (!b) continue;
+				pos[0] = b.x;
+				pos[1] = b.y;
+				pos[2] = b.z;
+				geom.attributes.position.needsUpdate = true;
 			}
 		}
 
@@ -680,7 +867,7 @@
 		const option1 = document.getElementById('toggleVisibility');
     	const statusText = document.getElementById("statusText");
 		option1.addEventListener("change", () => {
-			statusText.textContent = option1.checked ? "Option activée" : "Option désactivée";
+			statusText.textContent = option1.checked ? "Afficher les particules" : "Cacher les particules";
 
 			etoilesVisibles = !etoilesVisibles;
 			for (let i = 0; i < etoiles.length; i++) {
@@ -690,8 +877,179 @@
 					etoiles[i].material.opacity = etoilesVisibles ? 1 : 0;
 				}
 			}
-			
+
 		});	
+        
+
+
+        const TrajpartCheckbox = document.getElementById('Trajpart');
+        const trajStatusText = document.getElementById('trajStatusText') || TrajpartCheckbox.parentElement.nextElementSibling;
+        
+        function toggleTrajectoryVisibility(isVisible) {
+            const opacityValue = isVisible ? 1 : 0;
+
+            if (!isVisible) {
+
+                for (let t of trajectoire) {
+                    if (t && t.geometry) {
+                        const positionAttribute = t.geometry.attributes.position;
+                        if (positionAttribute) {
+                            positionAttribute.array.fill(0); 
+                            positionAttribute.needsUpdate = true;
+                }
+            }
+        }
+        compteurTrajectoire = 0; 
+    }
+
+    for (let t of trajectoire) {
+        if (t && t.material) {
+            t.material.opacity = opacityValue; 
+            t.material.needsUpdate = true;
+        }
+    }
+
+    isTrajectoryVisible = isVisible;
+    if (trajStatusText) {
+        trajStatusText.textContent = isVisible ? "Masquer trajectoire des particules" : "Afficher trajectoire des particules";
+    }
+}
+
+        if (TrajpartCheckbox) {
+             TrajpartCheckbox.checked = isTrajectoryVisible;
+             toggleTrajectoryVisibility(isTrajectoryVisible);
+             
+             TrajpartCheckbox.addEventListener("change", () => {
+                 toggleTrajectoryVisibility(TrajpartCheckbox.checked);
+             });
+        }
+        
+        
+
+
+		const sliders = [
+    { id: "slider_nb_particules", val: "val_nb_particules", target: "bodies" },
+    { id: "slider_Bext", val: "val_Bext", target: "Bext" } // Gère Bext
+];
+
+sliders.forEach(s => {
+    const slider = document.getElementById(s.id);
+    const output = document.getElementById(s.val);
+
+    if (slider && output) {
+        slider.addEventListener("input", () => {
+            const num = Number(slider.value);   
+            output.textContent = num;           
+            
+            if (s.target === "bodies") {
+                // MODIFICATION : Mise à jour de la variable globale avant le reset
+                numBodies = num; 
+                resetSimulation(num);               
+            } else if (s.target === "Bext") {
+                // Mise à jour de la variable globale B0 (doit être déclarée 'let' plus haut)
+                B0 = num; 
+				
+            }
+        });
+    }
+});
+
+// --- GESTION DU BOUTON DE RÉINITIALISATION (Utilise le bon ID) ---
+const resetButton = document.getElementById('resetButton');
+
+if (resetButton) {
+    resetButton.addEventListener('click', () => {
+       
+        const particleSlider = document.getElementById('slider_nb_particules');
+        const currentNumBodies = particleSlider ? Number(particleSlider.value) : numBodies; 
+        
+        // SAUVEGARDE DE L'ÉTAT DU SWITCH DES PARTICULES
+        const particleVisibilityCheckbox = document.getElementById('toggleVisibility');
+        const shouldBeHidden = particleVisibilityCheckbox ? particleVisibilityCheckbox.checked : false; 
+        resetSimulation(currentNumBodies);
+        
+        // ÉTAT DE VISIBILITÉ DES PARTICULES
+        if (shouldBeHidden) {
+             etoilesVisibles = false;
+             for (let i = 2; i < etoiles.length; i++) {
+                etoiles[i].material.opacity = 0;
+                etoiles[i].material.needsUpdate = true;
+             }
+        } else {
+             etoilesVisibles = true;
+             for (let i = 2; i < etoiles.length; i++) {
+                etoiles[i].material.opacity = 1;
+                etoiles[i].material.needsUpdate = true;
+             }
+        }
+        
+        
+        // Trajectoire
+        const TrajpartCheckbox = document.getElementById('Trajpart');
+        if (TrajpartCheckbox && TrajpartCheckbox.checked) {
+             TrajpartCheckbox.checked = false;
+             toggleTrajectoryVisibility(false);
+        }
+
+        // Collision
+        const CollisionCheckbox = document.getElementById('ToggleCollision');
+        if (CollisionCheckbox && CollisionCheckbox.checked) {
+            CollisionCheckbox.checked = false;
+            toggleCollisionVisibility(false);
+        }
+    });
+}
+
+
+
+        // --- GESTION DU BOUTON SWITCH DES COLLISIONS ---
+        const CollisionCheckbox = document.getElementById('ToggleCollision');
+        const CollisionStatusText = document.getElementById('collisionStatusText');
+
+        function toggleCollisionVisibility(isVisible) {
+            const opacityValue = isVisible ? 1 : 0;
+    
+        if (!isVisible) {
+        // 1. Parcourir tous les points de collision et réinitialiser leur position à (0, 0, 0)
+        for (let c of colisions) {
+            if (c) {
+                // C'est l'objet 3D lui-même (c) qui porte la position du point
+                c.position.set(0, 0, 0); 
+            }
+        }
+        compteurColisions = 0; 
+    }
+
+    //  Mettre à jour l'opacité 
+    for (let c of colisions) {
+        if (c && c.material) {
+            c.material.opacity = opacityValue; 
+            c.material.needsUpdate = true; 
+        }
+    }
+
+    // Mettre à jour l'état global et le texte
+    isCollisionVisible = isVisible;
+    if (CollisionStatusText) {
+        CollisionStatusText.textContent = isVisible ? "Masquer les collisions" : "Afficher les collisions";
+    }
+}
+
+        // Assure l'état initial (par défaut la case est cochée/visible)
+        if (CollisionCheckbox) {
+        // Initialiser la checkbox à l'état par défaut (visible = true)
+            CollisionCheckbox.checked = isCollisionVisible;
+            // Mettre à jour le texte du statut lors du chargement
+            if (CollisionStatusText) {
+                CollisionStatusText.textContent = isCollisionVisible ? "Masquer les collisions" : "Afficher les collisions";
+            }
+        // Applique l'opacité initiale (cela devrait être fait au reset/au début aussi)
+            toggleCollisionVisibility(isCollisionVisible);   
+            CollisionCheckbox.addEventListener("change", () => {
+            toggleCollisionVisibility(CollisionCheckbox.checked);
+    });
+}
+
 		animate();
     </script>
 </body>
