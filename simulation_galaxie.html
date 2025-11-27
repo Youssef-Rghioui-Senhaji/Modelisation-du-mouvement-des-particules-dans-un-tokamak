@@ -89,3 +89,107 @@
         const torusMesh = new THREE.Mesh(torusGeo, torusMat);
         torusMesh.rotation.x = Math.PI / 2;
         scene.add(torusMesh);
+
+        // ==========================================
+        // 3. STRUCTURE DE DONNÉES (OCTREE)
+        // ==========================================
+        
+        class Octree {
+            constructor(boundary, capacity) {
+                this.boundary = boundary; // {x, y, z, w, h, d}
+                this.capacity = capacity;
+                this.bodies = [];
+                this.divided = false;
+                
+                // Centre de masse/charge
+                this.totalCharge = 0;
+                this.com = { x: 0, y: 0, z: 0 }; 
+                this.avgVel = { x: 0, y: 0, z: 0 };
+            }
+
+            insert(p) {
+                if (!this.contains(p)) return false;
+                if (this.bodies.length < this.capacity && !this.divided) {
+                    this.bodies.push(p);
+                    return true;
+                }
+                if (!this.divided) this.subdivide();
+
+                return (this.nwf.insert(p) || this.nef.insert(p) || this.swf.insert(p) || this.sef.insert(p) ||
+                        this.nwb.insert(p) || this.neb.insert(p) || this.swb.insert(p) || this.seb.insert(p));
+            }
+
+            contains(p) {
+                const b = this.boundary;
+                return (p.x >= b.x - b.w && p.x <= b.x + b.w &&
+                        p.y >= b.y - b.h && p.y <= b.y + b.h &&
+                        p.z >= b.z - b.d && p.z <= b.z + b.d);
+            }
+
+            subdivide() {
+                const { x, y, z, w, h, d } = this.boundary;
+                const nw = w / 2, nh = h / 2, nd = d / 2;
+                const cap = this.capacity;
+                
+                this.nwf = new Octree({ x: x - nw, y: y + nh, z: z + nd, w: nw, h: nh, d: nd }, cap);
+                this.nef = new Octree({ x: x + nw, y: y + nh, z: z + nd, w: nw, h: nh, d: nd }, cap);
+                this.swf = new Octree({ x: x - nw, y: y - nh, z: z + nd, w: nw, h: nh, d: nd }, cap);
+                this.sef = new Octree({ x: x + nw, y: y - nh, z: z + nd, w: nw, h: nh, d: nd }, cap);
+                this.nwb = new Octree({ x: x - nw, y: y + nh, z: z - nd, w: nw, h: nh, d: nd }, cap);
+                this.neb = new Octree({ x: x + nw, y: y + nh, z: z - nd, w: nw, h: nh, d: nd }, cap);
+                this.swb = new Octree({ x: x - nw, y: y - nh, z: z - nd, w: nw, h: nh, d: nd }, cap);
+                this.seb = new Octree({ x: x + nw, y: y - nh, z: z - nd, w: nw, h: nh, d: nd }, cap);
+                
+                this.divided = true;
+                // Redistribuer les corps existants
+                for (let b of this.bodies) {
+                    this.nwf.insert(b) || this.nef.insert(b) || this.swf.insert(b) || this.sef.insert(b) ||
+                    this.nwb.insert(b) || this.neb.insert(b) || this.swb.insert(b) || this.seb.insert(b);
+                }
+                this.bodies = [];
+            }
+
+            // Calcule récursivement la charge totale et le centre de charge
+            computeMoments() {
+                if (!this.divided) {
+                    if (this.bodies.length === 0) return;
+                    let sumQ = 0, sumX = 0, sumY = 0, sumZ = 0;
+                    let sumVx = 0, sumVy = 0, sumVz = 0;
+                    for (let b of this.bodies) {
+                        sumQ += b.q;
+                        sumX += b.x * b.q; sumY += b.y * b.q; sumZ += b.z * b.q;
+                        sumVx += b.vx * b.q; sumVy += b.vy * b.q; sumVz += b.vz * b.q;
+                    }
+                    this.totalCharge = sumQ;
+                    if (Math.abs(sumQ) > 1e-25) {
+                        this.com = { x: sumX/sumQ, y: sumY/sumQ, z: sumZ/sumQ };
+                        this.avgVel = { x: sumVx/sumQ, y: sumVy/sumQ, z: sumVz/sumQ };
+                    } else {
+                        // Cas neutre (rare) ou vide
+                        this.com = { x: this.boundary.x, y: this.boundary.y, z: this.boundary.z };
+                    }
+                } else {
+                    let sumQ = 0, sumX = 0, sumY = 0, sumZ = 0;
+                    let sumVx = 0, sumVy = 0, sumVz = 0;
+                    const children = [this.nwf, this.nef, this.swf, this.sef, this.nwb, this.neb, this.swb, this.seb];
+                    for (let child of children) {
+                        child.computeMoments();
+                        sumQ += child.totalCharge;
+                        sumX += child.com.x * child.totalCharge;
+                        sumY += child.com.y * child.totalCharge;
+                        sumZ += child.com.z * child.totalCharge;
+                        sumVx += child.avgVel.x * child.totalCharge;
+                        sumVy += child.avgVel.y * child.totalCharge;
+                        sumVz += child.avgVel.z * child.totalCharge;
+                    }
+                    this.totalCharge = sumQ;
+                    if (Math.abs(sumQ) > 1e-25) {
+                        this.com = { x: sumX/sumQ, y: sumY/sumQ, z: sumZ/sumQ };
+                        this.avgVel = { x: sumVx/sumQ, y: sumVy/sumQ, z: sumVz/sumQ };
+                    } else {
+                        this.com = { x: this.boundary.x, y: this.boundary.y, z: this.boundary.z };
+                    }
+                }
+            }
+        }
+
