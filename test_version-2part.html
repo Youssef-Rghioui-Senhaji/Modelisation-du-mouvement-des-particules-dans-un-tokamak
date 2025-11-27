@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Tokamak - 2 Particles Mode</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        #overlay {
+            position: absolute; top: 10px; left: 10px; color: #00ffcc;
+            background: rgba(0,0,0,0.9); padding: 15px; border-radius: 8px; 
+            pointer-events: none; border: 1px solid #00ffcc; width: 240px;
+        }
+        h3 { margin: 0 0 10px 0; color: white; text-transform: uppercase; font-size: 14px; border-bottom: 1px solid #444; padding-bottom: 5px;}
+        .stat-line { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px; }
+        .val { font-weight: bold; color: #fff; }
+        .legend { margin-top: 10px; font-size: 11px; color: #aaa; border-top: 1px solid #444; padding-top: 5px; }
+        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stats.js/16/Stats.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
+</head>
+<body>
+
+    <div id="overlay">
+        <h3>Tokamak Physics</h3>
+        <div class="stat-line"><span>Mode:</span> <span class="val" id="modeDisplay">Nuage</span></div>
+        <div class="stat-line"><span>Sous-étapes/img:</span> <span class="val" id="stepDisplay">0</span></div>
+        <div class="stat-line"><span>Vitesse Max:</span> <span class="val" id="vMaxDisplay">0.00</span> %c</div>
+        
+        <div class="legend">
+            <div><span class="dot" style="background:#00ffff;"></span>Trajectoire Ion (Lourd/Bleu)</div>
+            <div><span class="dot" style="background:#ff00ff;"></span>Trajectoire Élec (Léger/Rouge)</div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. CONSTANTES & CONFIG
+        // ==========================================
+        const C = { c: 299792458, e0: 8.854e-12, mu0: 1.256e-6, me: 9.109e-31, mp: 1.672e-27, qe: 1.602e-19 };
+
+        const PARAMS = {
+            // Options générales
+            twoParticleMode: false, // LE NOUVEAU SWITCH
+            
+            // Réglages de vitesse
+            stepsPerFrame: 10,       
+            baseTimeStep: 5e-11,     
+            speedMult: 1.0,          
+            paused: false,
+            
+            // Tokamak
+            B0: 4.0,             
+            Ip: 1e6,             
+            R_maj: 20, r_min: 7,            
+            
+            // Visuel
+            trailLength: 500,    
+            
+            // Interne (ne pas toucher via GUI)
+            currentCount: 1000
+        };
+
+        // ==========================================
+        // 2. SETUP THREE.JS
+        // ==========================================
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 5000);
+        camera.position.set(0, 60, 50); 
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const stats = new Stats();
+        document.body.appendChild(stats.dom);
+
+        // Décor
+        const torusGeo = new THREE.TorusGeometry(PARAMS.R_maj, PARAMS.r_min, 24, 60);
+        const torusMat = new THREE.MeshBasicMaterial({ color: 0x222222, wireframe: true, transparent: true, opacity: 0.2 });
+        const torusMesh = new THREE.Mesh(torusGeo, torusMat);
+        torusMesh.rotation.x = Math.PI/2;
+        scene.add(torusMesh);
+
+        // ==========================================
+        // 3. GESTION DES PARTICULES
+        // ==========================================
+        let particles = [];
+        let trackedParticles = []; 
+        let pointCloud; // Référence au nuage de points ThreeJS
+
+        function initSystem() {
+            // 1. Nettoyage
+            particles = [];
+            trackedParticles.forEach(t => {
+                scene.remove(t.line);
+                scene.remove(t.mesh);
+            });
+            trackedParticles = [];
+            if(pointCloud) scene.remove(pointCloud);
+
+            // 2. Définition du nombre de particules selon le mode
+            const N = PARAMS.twoParticleMode ? 2 : 1000;
+            PARAMS.currentCount = N;
+
+            // 3. Création des Objets Graphiques (Nuage)
+            const particleGeo = new THREE.BufferGeometry();
+            const particlePos = new Float32Array(N * 3);
+            const particleCol = new Float32Array(N * 3);
+            particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
+            particleGeo.setAttribute('color', new THREE.BufferAttribute(particleCol, 3));
+            
+            pointCloud = new THREE.Points(particleGeo, new THREE.PointsMaterial({
+                size: 2.0, vertexColors: true, transparent: true, opacity: 0.9,
+                map: new THREE.TextureLoader().load('https://threejs.org/examples/textures/sprites/disc.png'),
+                alphaTest: 0.1
+            }));
+            scene.add(pointCloud);
+
+            // 4. Création Physique
+            for(let i=0; i<N; i++) {
+                let x, y, z, vx, vy, vz, q, m, isIon;
+
+                if (PARAMS.twoParticleMode) {
+                    // --- MODE 2 PARTICULES (CUSTOM) ---
+                    // Particule 0 : ION (Bleu)
+                    // Particule 1 : ELECTRON (Rouge)
+                    isIon = (i === 0);
+                    m = isIon ? C.mp : C.me;
+                    q = isIon ? C.qe : -C.qe;
+
+                    // On les place au centre du tore (côté extérieur)
+                    // R = R_maj, y = 0, z = 0
+                    const startR = PARAMS.R_maj + (isIon ? 2 : -2); 
+                    x = startR; 
+                    y = 0; 
+                    z = 0;
+
+                    // Vitesse tangentielle + un peu de verticale pour voir la spirale
+                    const vTang = 1e6; // 1000 km/s
+                    vx = 0;
+                    vy = (isIon ? 1e5 : 2e6); // Vitesse verticale
+                    vz = vTang * (isIon ? 1 : -1); // Sens opposé
+                    
+                } else {
+                    // --- MODE NUAGE ALEATOIRE ---
+                    const th = Math.random()*Math.PI*2;
+                    const ph = Math.random()*Math.PI*2;
+                    const r = (Math.random()+Math.random())*0.5 * PARAMS.r_min * 0.9;
+                    
+                    const R = PARAMS.R_maj + r*Math.cos(th);
+                    x = R*Math.cos(ph);
+                    y = r*Math.sin(th);
+                    z = R*Math.sin(ph);
+
+                    isIon = i % 2 === 0; 
+                    m = isIon ? C.mp : C.me;
+                    q = isIon ? C.qe : -C.qe;
+                    
+                    const vBase = isIon ? 2e5 : 4e6; 
+                    vx = (Math.random()-0.5)*vBase;
+                    vy = (Math.random()-0.5)*vBase;
+                    vz = (Math.random()-0.5)*vBase;
+                    
+                    // Drift
+                    const vDrift = 1e6;
+                    const sign = (q>0)?1:-1;
+                    vx -= Math.sin(ph)*vDrift*sign;
+                    vz += Math.cos(ph)*vDrift*sign;
+                }
+
+                const p = { x,y,z, vx,vy,vz, q, m, isIon };
+                particles.push(p);
+
+                // --- SYSTEME DE TRAINEE ---
+                // En mode 2 particules, on trace tout. En mode nuage, on trace les 5 premiers.
+                if(PARAMS.twoParticleMode || i < 5) {
+                    const maxPts = PARAMS.trailLength;
+                    const geo = new THREE.BufferGeometry();
+                    // On pré-alloue le buffer
+                    const positions = new Float32Array(maxPts * 3);
+                    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                    
+                    const color = isIon ? 0x00ffff : 0xff00ff; 
+                    const mat = new THREE.LineBasicMaterial({ color: color, linewidth: 2 });
+                    const line = new THREE.Line(geo, mat);
+                    line.frustumCulled = false;
+                    scene.add(line);
+
+                    const headGeo = new THREE.SphereGeometry(PARAMS.twoParticleMode ? 1 : 0.5, 8, 8);
+                    const headMat = new THREE.MeshBasicMaterial({ color: color });
+                    const mesh = new THREE.Mesh(headGeo, headMat);
+                    scene.add(mesh);
+
+                    trackedParticles.push({
+                        pRef: p, 
+                        line: line,
+                        mesh: mesh,
+                        history: [], 
+                        idx: 0
+                    });
+                }
+            }
+        }
+
+        // ==========================================
+        // 4. PHYSIQUE
+        // ==========================================
+        function getTokamakB(x, y, z) {
+            const R2 = x*x + z*z;
+            const R_local = Math.sqrt(R2);
+            const invR = 1/Math.max(R_local, 0.1);
+            
+            // Toroïdal
+            const Bt = (PARAMS.B0 * PARAMS.R_maj) * invR;
+            const tx = -z*invR, tz = x*invR;
+            
+            // Poloïdal
+            const r_pol = Math.sqrt((R_local - PARAMS.R_maj)**2 + y*y);
+            const Bp = (C.mu0 * PARAMS.Ip) / (2*Math.PI * Math.max(r_pol, 0.1));
+            
+            const sinT = y/Math.max(r_pol, 0.01);
+            const Bpx = -Bp * sinT * tz; 
+            const Bpy = Bp * (R_local - PARAMS.R_maj)/Math.max(r_pol,0.1);
+            const Bpz = Bp * sinT * tx;
+
+            return { x: Bt*tx + Bpx, y: Bpy, z: Bt*tz + Bpz };
+        }
+
+        function stepPhysics() {
+            const dt = PARAMS.baseTimeStep * PARAMS.speedMult;
+            let maxV2 = 0;
+
+            for(let i=0; i<particles.length; i++) {
+                const p = particles[i];
+                const B = getTokamakB(p.x, p.y, p.z);
+                
+                const qm = p.q / p.m;
+                const alpha = qm * dt * 0.5;
+
+                const vmx = p.vx; const vmy = p.vy; const vmz = p.vz;
+                const v2 = vmx*vmx + vmy*vmy + vmz*vmz;
+                const gamma = Math.sqrt(1 + v2/(C.c*C.c));
+
+                const tx = alpha * B.x / gamma;
+                const ty = alpha * B.y / gamma;
+                const tz = alpha * B.z / gamma;
+                const t2 = tx*tx + ty*ty + tz*tz;
+
+                const s = 2 / (1 + t2);
+                const sx = s*tx, sy = s*ty, sz = s*tz;
+
+                const vpx = vmx + (vmy*tz - vmz*ty);
+                const vpy = vmy + (vmz*tx - vmx*tz);
+                const vpz = vmz + (vmx*ty - vmy*tx);
+
+                p.vx = vmx + (vpy*sz - vpz*sy);
+                p.vy = vmy + (vpz*sx - vpx*sz);
+                p.vz = vmz + (vpx*sy - vpy*sx);
+
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+                p.z += p.vz * dt;
+
+                const R_loc = Math.sqrt(p.x*p.x + p.z*p.z);
+                const r_pol = Math.sqrt((R_loc - PARAMS.R_maj)**2 + p.y*p.y);
+                if(r_pol > PARAMS.r_min) {
+                    const nx = (p.x/R_loc)*(R_loc-PARAMS.R_maj)/r_pol;
+                    const ny = p.y/r_pol;
+                    const nz = (p.z/R_loc)*(R_loc-PARAMS.R_maj)/r_pol;
+                    const dot = p.vx*nx + p.vy*ny + p.vz*nz;
+                    p.vx -= 2*dot*nx; p.vy -= 2*dot*ny; p.vz -= 2*dot*nz;
+                    const corr = r_pol - PARAMS.r_min + 0.1;
+                    p.x -= nx*corr; p.y -= ny*corr; p.z -= nz*corr;
+                }
+
+                if(v2 > maxV2) maxV2 = v2;
+            }
+            return Math.sqrt(maxV2);
+        }
+
+        // ==========================================
+        // 5. RENDU
+        // ==========================================
+        function updateVisuals() {
+            // Update Nuage (si visible)
+            if (pointCloud) {
+                const posAttr = pointCloud.geometry.attributes.position;
+                const colAttr = pointCloud.geometry.attributes.color;
+                
+                for(let i=0; i<PARAMS.currentCount; i++) {
+                    const p = particles[i];
+                    posAttr.setXYZ(i, p.x, p.y, p.z);
+                    if(p.isIon) colAttr.setXYZ(i, 0.2, 0.6, 1.0);
+                    else colAttr.setXYZ(i, 1.0, 0.2, 0.2);
+                }
+                posAttr.needsUpdate = true;
+                colAttr.needsUpdate = true;
+            }
+
+            // Update Traînées
+            trackedParticles.forEach(t => {
+                const p = t.pRef;
+                t.mesh.position.set(p.x, p.y, p.z);
+                t.history.push(p.x, p.y, p.z);
+                if(t.history.length > PARAMS.trailLength * 3) t.history.splice(0, 3);
+
+                const positions = t.line.geometry.attributes.position.array;
+                let count = 0;
+                for(let j=0; j<t.history.length; j+=3) {
+                    positions[count++] = t.history[j];
+                    positions[count++] = t.history[j+1];
+                    positions[count++] = t.history[j+2];
+                }
+                // Combler la fin du buffer pour éviter les artefacts
+                const lx = t.history[t.history.length-3];
+                const ly = t.history[t.history.length-2];
+                const lz = t.history[t.history.length-1];
+                for(let k=count; k<positions.length; k+=3) {
+                    positions[k] = lx; positions[k+1] = ly; positions[k+2] = lz;
+                }
+                t.line.geometry.attributes.position.needsUpdate = true;
+            });
+        }
+
+        // --- GUI ---
+        const gui = new dat.GUI();
+        
+        // --- BOUTON MAGIQUE ---
+        gui.add(PARAMS, 'twoParticleMode')
+           .name('🔴 2 Particules (Debug)')
+           .onChange(initSystem); // Recharge tout quand on clique
+        // ----------------------
+
+        const f1 = gui.addFolder('Simulation');
+        f1.add(PARAMS, 'speedMult', 0.1, 5.0).name('Vitesse Temps');
+        f1.add(PARAMS, 'stepsPerFrame', 1, 50).step(1).name('Calculs / Image');
+        f1.add(PARAMS, 'trailLength', 10, 2000).name('Longueur Trace');
+        f1.add(PARAMS, 'paused').name('PAUSE');
+        f1.open();
+
+        gui.add({ r: initSystem }, 'r').name('RESTART');
+
+        // Init
+        initSystem();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            stats.begin();
+            
+            let vMax = 0;
+            if(!PARAMS.paused) {
+                for(let k=0; k<PARAMS.stepsPerFrame; k++) vMax = stepPhysics();
+                updateVisuals();
+            }
+
+            document.getElementById('modeDisplay').innerText = PARAMS.twoParticleMode ? "2 Particules" : "Nuage Plasma";
+            document.getElementById('stepDisplay').innerText = PARAMS.stepsPerFrame;
+            document.getElementById('vMaxDisplay').innerText = (100 * vMax / C.c).toFixed(3);
+
+            renderer.render(scene, camera);
+            stats.end();
+        }
+
+        animate();
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth/window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
