@@ -83,27 +83,44 @@
       width: 18px; height: 18px;
       background: #9b59b6; border-radius: 50%;
     }
-
     </style>
 </head>
 <body>
-
-	<div id="cameraInfo" style="position: absolute; top: 10px; left: 100px; color: white; font-size: 25px; background-color: rgba(0, 0, 0, 0.5); padding: 10px;"></div>
-    <canvas id="galaxyCanvas"></canvas>
-
-
-	<h1>Trajectoire particule</h1>
+	<h1>Modifications des paramètres et Affichage</h1>
 	<label class="switch">
-		<input type="checkbox" id="toggleVisibility">
-		<span class="slider-switch"></span>
-	</label>
-	<span id="statusText">Option désactivée</span>
+        <input type="checkbox" id="toggleVisibility">
+        <span class="slider-switch"></span>
+    </label>
+    <span id="statusText">Cacher les particules</span>
 
-	<div class="range-container">
-		<label for="slider4">Nombre de particules :</label><br>
-		<input type="range" id="slider4" class="slider-steps" min="100" max="3000" step="100" value="500">
-		<span id="val4">500</span>
-	</div>
+    <label class="switch">
+        <input type="checkbox" id="Trajpart">
+        <span class="slider-switch"></span>
+    </label>
+    <span id="trajStatusText">Afficher trajectoire des particules</span>
+
+    <label class="switch">
+        <input type="checkbox" id="ToggleCollision">
+        <span class="slider-switch"></span>
+    </label>
+    <span id="collisionStatusText">Afficher les collisions</span>
+
+
+    <div class="range-container">
+        <label for="slider_nb_particules">Nombre de particules :</label><br>
+        <input type="range" id="slider_nb_particules" class="slider-steps" min="100" max="3000" step="100" value="500">
+    <span id="val_nb_particules">500</span>
+    </div>
+
+    <div class="range-container">
+        <label for="slider_Bext">Valeur du champ Bext :</label><br>
+        <input type="range" id="slider_Bext" class="slider-steps" min="0" max="100" step="1" value="10">
+    <span id="val_Bext">10</span>
+    </div>
+
+    <button id="resetButton" style="padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #3498db; color: white; border: none; border-radius: 5px; margin-top: 20px;">
+        Réinitialiser la Simulation (Position uniquement)
+    </button>
 
 	<script>// stats.js - http://github.com/mrdoob/stats.js
 			(function(f,e){"object"===typeof exports&&"undefined"!==typeof module?module.exports=e():"function"===typeof define&&define.amd?define(e):f.Stats=e()})(this,function(){var f=function(){function e(a){c.appendChild(a.dom);return a}function u(a){for(var d=0;d<c.children.length;d++)c.children[d].style.display=d===a?"block":"none";l=a}var l=0,c=document.createElement("div");c.style.cssText="position:fixed;top:0;left:0;cursor:pointer;opacity:0.9;z-index:10000";c.addEventListener("click",function(a){a.preventDefault();
@@ -148,7 +165,7 @@
 
         // --- PARAMÈTRES GLOBAUX ---
 		const theta = 0.4; // Seuil d'approximation de Barnes-Hut
-		const numBodies = 500; // Nombre d'étoiles (réduis pour debug si besoin)
+		let numBodies = 500; // Nombre d'étoiles (réduis pour debug si besoin)
 
 
 
@@ -165,7 +182,7 @@
 		const mp=10e-30; // masse s'un proton
 		const qe=10e-19; // charge elementaire (valeur d'échelle)
 
-		const B0=10; // champ toroïdal de base (échelle)
+		let B0=10; // champ toroïdal de base (échelle)
 		const Ip=1e7; // courant plasma (échelle)
 
 		const coefvitesse1=1e8; // constante multiplicatrice pour la vitesse initiale 
@@ -174,6 +191,7 @@
 		
 		let R= width*0.4 ;
 		let r= R/2;
+     
 
 
 		// --- CLASSE Octree ---
@@ -437,6 +455,10 @@
 		// cR2ATION DES PARTICULES 
 
 		let etoilesVisibles = true;
+		// --- NOUVELLE VARIABLE GLOBALE pour la visibilité de la trajectoire
+		let isTrajectoryVisible = false;
+		// --- FIN NOUVELLE VARIABLE GLOBALE
+
 		const bodies = []; 
 		const etoiles = []; 
 		const colisions = [];
@@ -444,6 +466,7 @@
 		const trajectoire = [];	
 		const numTrajectoire=1000; 
 		let compteurTrajectoire=0;
+        let isCollisionVisible = false; // Initialiser à true (elles sont visibles par défaut)
 
 		let pointGeometry = new THREE.BufferGeometry();
 
@@ -505,15 +528,17 @@
 			compteurColisions = 0;
 
 			const numColisions = 1000;
-			for (let i = 0; i < numColisions; i++) {
-				const geom = new THREE.BufferGeometry();
-				geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0,0,0]), 3));
-				const mat = new THREE.PointsMaterial({ color: 0x00ff00, size: 2, opacity: 1, sizeAttenuation: false });
-				const p = new THREE.Points(geom, mat);
-				colisions.push(p);
-				scene.add(p);
-			}
-		}
+                for (let i = 0; i < numColisions; i++) {
+                    const geom = new THREE.BufferGeometry();
+                    geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0,0,0]), 3));
+                    // MODIFICATION: Utiliser la variable globale
+                    const opacity = isCollisionVisible ? 1 : 0;
+                    const mat = new THREE.PointsMaterial({ color: 0x00ff00, size: 2, opacity: opacity, sizeAttenuation: false });
+                    const p = new THREE.Points(geom, mat);
+                    colisions.push(p);
+                    scene.add(p);
+                }
+        }
 		function createTrajectoire() {
 			// libère s'il y a déjà quelque chose
 			for (let t of trajectoire) { if (t) { scene.remove(t); if (t.geometry) t.geometry.dispose(); if (t.material) t.material.dispose(); } }
@@ -524,7 +549,8 @@
 				const geom = new THREE.BufferGeometry();
 				geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0,0,0]), 3));
 				const color = (i % 2 === 0) ? 0xf5aa42 : 0x00ffff;
-				const mat = new THREE.PointsMaterial({ color: color, size: 2, opacity: 0, sizeAttenuation: false });
+				// IMPORTANT: Opacité à 0 par défaut (sera contrôlée par isTrajectoryVisible)
+				const mat = new THREE.PointsMaterial({ color: color, size: 2, opacity: 0, sizeAttenuation: false }); 
 				const p = new THREE.Points(geom, mat);
 				trajectoire.push(p);
 				scene.add(p);
@@ -566,17 +592,32 @@
 			}
 			trajectoire.length = 0;
 			compteurTrajectoire = 0;
-
+            isTrajectoryVisible = false; // Remettre à faux au reset
+            
 			// recréer tout
 			createBodiesAndEtoiles(numBodies);
 			createColisions();     
 			createTrajectoire();  
+            
+            // Appliquer l'état de la checkbox Trajpart après recréation
+            const TrajpartCheckbox = document.getElementById('Trajpart');
+            if (TrajpartCheckbox) {
+                TrajpartCheckbox.checked = false; // Par défaut au reset
+                toggleTrajectoryVisibility(false);
+            }
+
 
 			console.log("RESET DONE");
 		}
 
 
 		function update_trajectoire() {
+            // --- MODIFICATION 1 : Arrêter la création de trace si masquée.
+            if (!isTrajectoryVisible) { 
+                return;
+            }
+            // --- FIN MODIFICATION 1
+
 			// protège si pas assez de corps
 			if (!bodies || bodies.length < 2 || !trajectoire || trajectoire.length === 0) return;
 
@@ -616,11 +657,16 @@
 			// écriture pour les deux points (curr et next)
 			setPointPosition(trajectoire[idx], b0.x, b0.y, b0.z);
 			setPointPosition(trajectoire[idxNext], b1.x, b1.y, b1.z);
+            
+            // NOTE: L'opacité est gérée par toggleTrajectoryVisibility
 
 			// incrémenter de 2 (tu stockes deux positions à la fois)
 			compteurTrajectoire = (compteurTrajectoire + 2) % Number.MAX_SAFE_INTEGER;
 		}
 		function update_colisions(body){
+            if (!isCollisionVisible) {
+                return; 
+            }
 			let indice=compteurColisions%numColisions;
 			let last=colisions[indice];
 			last.position.set(body.x,body.y,body.z)
@@ -821,7 +867,7 @@
 		const option1 = document.getElementById('toggleVisibility');
     	const statusText = document.getElementById("statusText");
 		option1.addEventListener("change", () => {
-			statusText.textContent = option1.checked ? "Option activée" : "Option désactivée";
+			statusText.textContent = option1.checked ? "Afficher les particules" : "Cacher les particules";
 
 			etoilesVisibles = !etoilesVisibles;
 			for (let i = 0; i < etoiles.length; i++) {
@@ -833,22 +879,176 @@
 			}
 
 		});	
+        
+
+
+        const TrajpartCheckbox = document.getElementById('Trajpart');
+        const trajStatusText = document.getElementById('trajStatusText') || TrajpartCheckbox.parentElement.nextElementSibling;
+        
+        function toggleTrajectoryVisibility(isVisible) {
+            const opacityValue = isVisible ? 1 : 0;
+
+            if (!isVisible) {
+
+                for (let t of trajectoire) {
+                    if (t && t.geometry) {
+                        const positionAttribute = t.geometry.attributes.position;
+                        if (positionAttribute) {
+                            positionAttribute.array.fill(0); 
+                            positionAttribute.needsUpdate = true;
+                }
+            }
+        }
+        compteurTrajectoire = 0; 
+    }
+
+    for (let t of trajectoire) {
+        if (t && t.material) {
+            t.material.opacity = opacityValue; 
+            t.material.needsUpdate = true;
+        }
+    }
+
+    isTrajectoryVisible = isVisible;
+    if (trajStatusText) {
+        trajStatusText.textContent = isVisible ? "Masquer trajectoire des particules" : "Afficher trajectoire des particules";
+    }
+}
+
+        if (TrajpartCheckbox) {
+             TrajpartCheckbox.checked = isTrajectoryVisible;
+             toggleTrajectoryVisibility(isTrajectoryVisible);
+             
+             TrajpartCheckbox.addEventListener("change", () => {
+                 toggleTrajectoryVisibility(TrajpartCheckbox.checked);
+             });
+        }
+        
+        
 
 
 		const sliders = [
-			{ id: "slider4", val: "val4" },
-		];
+    { id: "slider_nb_particules", val: "val_nb_particules", target: "bodies" },
+    { id: "slider_Bext", val: "val_Bext", target: "Bext" } // Gère Bext
+];
 
-		sliders.forEach(s => {
-			const slider = document.getElementById(s.id);
-			const output = document.getElementById(s.val);
+sliders.forEach(s => {
+    const slider = document.getElementById(s.id);
+    const output = document.getElementById(s.val);
 
-			slider.addEventListener("input", () => {
-				const num = Number(slider.value);   
-				output.textContent = num;           
-				resetSimulation(num);               
-			});
-		});
+    if (slider && output) {
+        slider.addEventListener("input", () => {
+            const num = Number(slider.value);   
+            output.textContent = num;           
+            
+            if (s.target === "bodies") {
+                // MODIFICATION : Mise à jour de la variable globale avant le reset
+                numBodies = num; 
+                resetSimulation(num);               
+            } else if (s.target === "Bext") {
+                // Mise à jour de la variable globale B0 (doit être déclarée 'let' plus haut)
+                B0 = num; 
+				
+            }
+        });
+    }
+});
+
+// --- GESTION DU BOUTON DE RÉINITIALISATION (Utilise le bon ID) ---
+const resetButton = document.getElementById('resetButton');
+
+if (resetButton) {
+    resetButton.addEventListener('click', () => {
+       
+        const particleSlider = document.getElementById('slider_nb_particules');
+        const currentNumBodies = particleSlider ? Number(particleSlider.value) : numBodies; 
+        
+        // SAUVEGARDE DE L'ÉTAT DU SWITCH DES PARTICULES
+        const particleVisibilityCheckbox = document.getElementById('toggleVisibility');
+        const shouldBeHidden = particleVisibilityCheckbox ? particleVisibilityCheckbox.checked : false; 
+        resetSimulation(currentNumBodies);
+        
+        // ÉTAT DE VISIBILITÉ DES PARTICULES
+        if (shouldBeHidden) {
+             etoilesVisibles = false;
+             for (let i = 2; i < etoiles.length; i++) {
+                etoiles[i].material.opacity = 0;
+                etoiles[i].material.needsUpdate = true;
+             }
+        } else {
+             etoilesVisibles = true;
+             for (let i = 2; i < etoiles.length; i++) {
+                etoiles[i].material.opacity = 1;
+                etoiles[i].material.needsUpdate = true;
+             }
+        }
+        
+        
+        // Trajectoire
+        const TrajpartCheckbox = document.getElementById('Trajpart');
+        if (TrajpartCheckbox && TrajpartCheckbox.checked) {
+             TrajpartCheckbox.checked = false;
+             toggleTrajectoryVisibility(false);
+        }
+
+        // Collision
+        const CollisionCheckbox = document.getElementById('ToggleCollision');
+        if (CollisionCheckbox && CollisionCheckbox.checked) {
+            CollisionCheckbox.checked = false;
+            toggleCollisionVisibility(false);
+        }
+    });
+}
+
+
+
+        // --- GESTION DU BOUTON SWITCH DES COLLISIONS ---
+        const CollisionCheckbox = document.getElementById('ToggleCollision');
+        const CollisionStatusText = document.getElementById('collisionStatusText');
+
+        function toggleCollisionVisibility(isVisible) {
+            const opacityValue = isVisible ? 1 : 0;
+    
+        if (!isVisible) {
+        // 1. Parcourir tous les points de collision et réinitialiser leur position à (0, 0, 0)
+        for (let c of colisions) {
+            if (c) {
+                // C'est l'objet 3D lui-même (c) qui porte la position du point
+                c.position.set(0, 0, 0); 
+            }
+        }
+        compteurColisions = 0; 
+    }
+
+    //  Mettre à jour l'opacité 
+    for (let c of colisions) {
+        if (c && c.material) {
+            c.material.opacity = opacityValue; 
+            c.material.needsUpdate = true; 
+        }
+    }
+
+    // Mettre à jour l'état global et le texte
+    isCollisionVisible = isVisible;
+    if (CollisionStatusText) {
+        CollisionStatusText.textContent = isVisible ? "Masquer les collisions" : "Afficher les collisions";
+    }
+}
+
+        // Assure l'état initial (par défaut la case est cochée/visible)
+        if (CollisionCheckbox) {
+        // Initialiser la checkbox à l'état par défaut (visible = true)
+            CollisionCheckbox.checked = isCollisionVisible;
+            // Mettre à jour le texte du statut lors du chargement
+            if (CollisionStatusText) {
+                CollisionStatusText.textContent = isCollisionVisible ? "Masquer les collisions" : "Afficher les collisions";
+            }
+        // Applique l'opacité initiale (cela devrait être fait au reset/au début aussi)
+            toggleCollisionVisibility(isCollisionVisible);   
+            CollisionCheckbox.addEventListener("change", () => {
+            toggleCollisionVisibility(CollisionCheckbox.checked);
+    });
+}
 
 		animate();
     </script>
