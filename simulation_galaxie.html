@@ -115,7 +115,7 @@
     <div class="range-container">
         <label for="slider_Bext">Valeur du champ Bext :</label><br>
         <input type="range" id="slider_Bext" class="slider-steps" min="0" max="100" step="1" value="50">
-    <span id="val_Bext">10</span>
+    <span id="val_Bext">50</span>
     </div>
 
     <button id="resetButton" style="padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #3498db; color: white; border: none; border-radius: 5px; margin-top: 20px;">
@@ -182,7 +182,7 @@
 		const mp=10e-30; // masse s'un proton
 		const qe=10e-19; // charge elementaire (valeur d'échelle)
 
-		let B0=0; // champ toroïdal de base (échelle)
+		let B0=50; // champ toroïdal de base (échelle)
 		const Ip=1e7; // courant plasma (échelle)
 
 		const coefvitesse1=1e8; // constante multiplicatrice pour la vitesse initiale 
@@ -376,7 +376,7 @@
 				let T2 = hom(node.charge / Math.max(denom2, 1e-10), T2vec);
 
 				let E = sum(T1, T2);
-				E = hom(0e1/numBodies,E);
+				E = hom(1e13/numBodies,E);
 
 				
 
@@ -497,7 +497,7 @@
 				bodies.push({
 					x, y, z, vx, vy, vz,
 					ax: 0, ay: 0, az: 0,
-					charge, mass, lorentz: 1
+					charge, mass, lorentz: 1 / Math.sqrt(Math.max(1 - (vx*vx + vy*vy + vz*vz) / (celerite*celerite), 1e-30))
 				});
 
 				let color = (charge < 0) ? 0xff0000 : 0x0000ff;
@@ -701,7 +701,7 @@
 					az: body.az,
 					charge: body.charge,
 					mass: body.mass,
-					lorentz: 1 
+					lorentz: 1 / Math.sqrt(Math.max(1 - ((body.vx + dt*body.ax)*(body.vx + dt*body.ax) + (body.vy + dt*body.ay)*(body.vy + dt*body.ay) + (body.vz + dt*body.az)*(body.vz + dt*body.az)) / (celerite*celerite), 1e-50))
 				}
 
 				let Fi = computeField(copyBody, octree);
@@ -712,18 +712,19 @@
 				let lorentzi=copyBody.lorentz;
 
 				let k=0.5*dt*body.charge/body.mass;
-				let A= 1/(lorentzi*lorentzi+k*k*scal(Btoti,Btoti));
+				let C=hom(k,B); let Ci=hom(k,B);
+				let A= 1/(lorentzi*lorentzi+scal(Ci,Ci));
 
 				
 
-				let a =  (1+k*k*Btoti.x*Btoti.x/lorentzi); let b = (k*Btoti.z + k*k*Btoti.x*Btoti.y/lorentzi); let c = (-k*Btoti.y + k*k*Btoti.x*Btoti.z/lorentzi);
-				let d = (-k*Btoti.z + k*k*Btoti.x*Btoti.y/lorentzi); let e = (1+k*k*Btoti.y*Btoti.y/lorentzi); let f = (k*Btoti.x + k*k*Btoti.y*Btoti.z/lorentzi);
-				let g = (k*Btoti.y + k*k*Btoti.x*Btoti.z/lorentzi); let h = (-k*Btoti.x + k*k*Btoti.y*Btoti.z/lorentzi); let i=(1+k*k*Btoti.z*Btoti.z/lorentzi);
+				let a =  1+Ci.x*Ci.x/lorentzi; let b = Ci.z + Ci.x*Ci.y/lorentzi; let c = -Ci.y + Ci.x*Ci.z/lorentzi;
+				let d = -Ci.z + Ci.x*Ci.y/lorentzi; let e = 1+Ci.y*Ci.y/lorentzi; let f = Ci.x + Ci.y*Ci.z/lorentzi;
+				let g = Ci.y + Ci.x*Ci.z/lorentzi; let h = -Ci.x + Ci.y*Ci.z/lorentzi; let i=1+Ci.z*Ci.z/lorentzi;
 
 
-				let alpha =  lorentz*a - k*Btot.z*b + k*Btot.y*c; let beta = k*Btot.z*a +  lorentz*b - k*Btot.x*c/lorentz; let gamma = -k*Btot.y*a + k*Btot.x*b +  lorentz*c;
-				let delta =  lorentz*d - k*Btot.z*e + k*Btot.y*f; let epsilon = k*Btot.z*d +  lorentz*e - k*Btot.x*f/lorentz; let ksi = -k*Btot.y*d + k*Btot.x*e +  lorentz*f;
-				let nu =  lorentz*g - k*Btot.z*h + k*Btot.y*i/lorentz; let theta = k*Btot.z*g +  lorentz*h - k*Btot.x*i/lorentz; let iota = -k*Btot.y*g + k*Btot.x*h +  lorentz*i;
+				let alpha =  lorentz*a - C.z*b + C.y*c; let beta = C.z*a +  lorentz*b - C.x*c; let gamma = -C.y*a + C.x*b +  lorentz*c;
+				let delta =  lorentz*d - C.z*e + C.y*f; let epsilon = C.z*d +  lorentz*e - C.x*f; let ksi = -C.y*d + C.x*e +  lorentz*f;
+				let nu =  lorentz*g - C.z*h + C.y*i; let theta = C.z*g +  lorentz*h - C.x*i; let iota = -C.y*g + C.x*h +  lorentz*i;
 
 
 
@@ -804,7 +805,7 @@
 				}
 
 
-				body.lorentz=1 ;
+				body.lorentz=1 / Math.sqrt(Math.max(1 - (body.vx*body.vx + body.vy*body.vy + body.vz*body.vz) / (celerite*celerite), 1e-30)) ;
 				
 
 
@@ -852,7 +853,7 @@
 		function animate() {
 			requestAnimationFrame(animate);
 			const now = performance.now();
-			let deltaTime = 1e-10 ;
+			let deltaTime = 1e-9 ;
 			lastTime = now;
 
 			let vmax = update(deltaTime);
