@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Tokamak Simulation - Light Mode</title>
+    <style>
+        /* FOND BLANC CASSÉ et TEXTE FONCÉ */
+        body { margin: 0; overflow: hidden; background: #f5f5f5; font-family: 'Segoe UI', sans-serif; color: #333; }
+        
+        #overlay {
+            position: absolute; top: 10px; left: 10px; 
+            color: #222; /* Texte foncé */
+            background: rgba(255,255,255,0.9); /* Fond blanc transparent */
+            padding: 15px; border-radius: 8px; 
+            pointer-events: none; 
+            border: 1px solid #bbb; /* Bordure grise */
+            font-size: 13px; width: 220px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h3 { margin: 0 0 10px 0; color: #111; text-transform: uppercase; letter-spacing: 1px; font-size: 14px; border-bottom: 1px solid #ddd; padding-bottom: 5px;}
+        .stat-line { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        .val { font-weight: bold; color: #000; } /* Valeurs en noir pur */
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stats.js/16/Stats.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
+</head>
+<body>
+
+    <div id="overlay">
+        <h3>Tokamak Monitor</h3>
+        <div class="stat-line"><span>Particules:</span> <span class="val" id="pCount">0</span></div>
+        <div class="stat-line"><span>Simul Steps/Frame:</span> <span class="val" id="stepDisplay">0</span></div>
+        <div class="stat-line"><span>Vitesse Max:</span> <span class="val" id="vMaxDisplay">0.00</span> %c</div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. CONSTANTES PHYSIQUES
+        // ==========================================
+        const C = {
+            c: 299792458,
+            e0: 8.854e-12,
+            mu0: 1.256e-6,
+            me: 9.109e-31,
+            mp: 1.672e-27,
+            qe: 1.602e-19
+        };
+
+        const PARAMS = {
+            numParticles: 1500,
+            
+            // --- REGLAGES DE VITESSE VISUELLE ---
+            stepsPerFrame: 20,   
+            baseTimeStep: 2e-11, 
+            speedMult: 1.0,      
+            
+            paused: false,
+            
+            // Tokamak
+            B0: 3.5,             
+            Ip: 8e5,             
+            R_maj: 20,           
+            r_min: 7,            
+            
+            // Interactions
+            WEIGHT: 2e7,         
+            interStrength: 0.0,  
+            softening: 1.0,
+            
+            showTorus: true
+        };
+
+        // ==========================================
+        // 2. RENDU THREE.JS (CONFIGURATION LIGHT)
+        // ==========================================
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf5f5f5); // Couleur de fond JS
+        scene.fog = new THREE.Fog(0xf5f5f5, 50, 150); // Brouillard pour fondre l'horizon
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 5000);
+        camera.position.set(45, 35, 45);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const stats = new Stats();
+        document.body.appendChild(stats.dom);
+
+        // Décor: Le Tore (NOIR et fin pour le contraste)
+        const torusGeo = new THREE.TorusGeometry(PARAMS.R_maj, PARAMS.r_min, 16, 48);
+        const torusMat = new THREE.MeshBasicMaterial({ 
+            color: 0x000000, // Fil noir
+            wireframe: true, 
+            opacity: 0.1,    // Très discret
+            transparent: true 
+        });
+        const torusMesh = new THREE.Mesh(torusGeo, torusMat);
+        torusMesh.rotation.x = Math.PI/2;
+        scene.add(torusMesh);
+
+        // ==========================================
+        // 3. BARNES-HUT OCTREE
+        // ==========================================
+        class Octree {
+            constructor(boundary, capacity) {
+                this.boundary = boundary; 
+                this.capacity = capacity;
+                this.bodies = [];
+                this.divided = false;
+                this.com = {x:0, y:0, z:0}; 
+                this.totalQ = 0;
+            }
+
+            insert(p) {
+                if(!this.contains(p)) return false;
+                if(this.bodies.length < this.capacity && !this.divided) {
+                    this.bodies.push(p);
+                    return true;
+                }
+                if(!this.divided) this.subdivide();
+                return (this.nwf.insert(p) || this.nef.insert(p) || this.swf.insert(p) || this.sef.insert(p) ||
+                        this.nwb.insert(p) || this.neb.insert(p) || this.swb.insert(p) || this.seb.insert(p));
+            }
+
+            contains(p) {
+                const b = this.boundary;
+                return (p.x >= b.x-b.w && p.x <= b.x+b.w &&
+                        p.y >= b.y-b.h && p.y <= b.y+b.h &&
+                        p.z >= b.z-b.d && p.z <= b.z+b.d);
+            }
+
+            subdivide() {
+                const {x,y,z,w,h,d} = this.boundary;
+                const nw=w/2, nh=h/2, nd=d/2;
+                const c = this.capacity;
+                const mk = (dx,dy,dz) => new Octree({x:x+dx, y:y+dy, z:z+dz, w:nw, h:nh, d:nd}, c);
+                
+                this.nwf = mk(-nw, nh, nd); this.nef = mk(nw, nh, nd);
+                this.swf = mk(-nw, -nh, nd); this.sef = mk(nw, -nh, nd);
+                this.nwb = mk(-nw, nh, -nd); this.neb = mk(nw, nh, -nd);
+                this.swb = mk(-nw, -nh, -nd); this.seb = mk(nw, -nh, -nd);
+                
+                this.divided = true;
+                for(let b of this.bodies) {
+                    this.nwf.insert(b) || this.nef.insert(b) || this.swf.insert(b) || this.sef.insert(b) ||
+                    this.nwb.insert(b) || this.neb.insert(b) || this.swb.insert(b) || this.seb.insert(b);
+                }
+                this.bodies = [];
+            }
+
+            computeMoments() {
+                if(!this.divided) {
+                    if(this.bodies.length === 0) return;
+                    let sumQ=0, sumX=0, sumY=0, sumZ=0;
+                    for(let b of this.bodies) {
+                        sumQ += b.q;
+                        sumX += b.x*b.q; sumY += b.y*b.q; sumZ += b.z*b.q;
+                    }
+                    this.totalQ = sumQ;
+                    if(Math.abs(sumQ)>1e-25) this.com = {x:sumX/sumQ, y:sumY/sumQ, z:sumZ/sumQ};
+                    else this.com = {x:this.boundary.x, y:this.boundary.y, z:this.boundary.z};
+                } else {
+                    let sumQ=0, sumX=0, sumY=0, sumZ=0;
+                    const kids = [this.nwf, this.nef, this.swf, this.sef, this.nwb, this.neb, this.swb, this.seb];
+                    for(let k of kids) {
+                        k.computeMoments();
+                        sumQ += k.totalQ;
+                        sumX += k.com.x * k.totalQ; sumY += k.com.y * k.totalQ; sumZ += k.com.z * k.totalQ;
+                    }
+                    this.totalQ = sumQ;
+                    if(Math.abs(sumQ)>1e-25) this.com = {x:sumX/sumQ, y:sumY/sumQ, z:sumZ/sumQ};
+                    else this.com = {x:this.boundary.x, y:this.boundary.y, z:this.boundary.z};
+                }
+            }
+        }
+
+        // ==========================================
+        // 4. PHYSIQUE DES PARTICULES
+        // ==========================================
+        let particles = [];
+        let cachedE = [];
+
+        function initParticles() {
+            particles = [];
+            cachedE = [];
+            for(let i=0; i<PARAMS.numParticles; i++) {
+                const theta = Math.random()*Math.PI*2;
+                const phi = Math.random()*Math.PI*2;
+                const r = (Math.random()+Math.random())*0.5 * PARAMS.r_min * 0.8;
+
+                const R = PARAMS.R_maj + r*Math.cos(theta);
+                const x = R*Math.cos(phi);
+                const y = r*Math.sin(theta);
+                const z = R*Math.sin(phi);
+
+                const isIon = Math.random() > 0.5;
+                const m = isIon ? C.mp : C.me;
+                const q = isIon ? C.qe : -C.qe;
+
+                const vTh = (isIon ? 1e5 : 4e6); 
+                let vx = (Math.random()-0.5)*vTh;
+                let vy = (Math.random()-0.5)*vTh;
+                let vz = (Math.random()-0.5)*vTh;
+                
+                const vDrift = 1e6;
+                const sign = (q>0)?1:-1;
+                vx -= Math.sin(phi)*vDrift*sign; 
+                vz += Math.cos(phi)*vDrift*sign;
+
+                // COULEURS CONTRASTÉES POUR FOND CLAIR
+                // Ions = Bleu Profond, Elecs = Rouge Vif
+                const col = isIon ? [0.1, 0.4, 0.9] : [0.9, 0.1, 0.1];
+
+                particles.push({ x, y, z, vx, vy, vz, q, m, color: col });
+                
+                cachedE.push({x:0, y:0, z:0});
+            }
+        }
+
+        function getTokamakB(x, y, z) {
+            const R2 = x*x + z*z;
+            const R_local = Math.sqrt(R2);
+            const invR = 1/Math.max(R_local, 0.1);
+            
+            const Bt = (PARAMS.B0 * PARAMS.R_maj) * invR;
+            const tx = -z*invR; 
+            const tz = x*invR;  
+            
+            const r_pol = Math.sqrt((R_local - PARAMS.R_maj)**2 + y*y);
+            const Bp = (C.mu0 * PARAMS.Ip) / (2*Math.PI * Math.max(r_pol, 0.1));
+            
+            const sinT = y/Math.max(r_pol, 0.01);
+            const Bpx = -Bp * sinT * tz; 
+            const Bpy = Bp * (R_local - PARAMS.R_maj)/Math.max(r_pol,0.1);
+            const Bpz = Bp * sinT * tx;
+
+            return { x: Bt*tx + Bpx, y: Bpy, z: Bt*tz + Bpz };
+        }
+
+        function computeForces(p, node) {
+            let Ex=0, Ey=0, Ez=0;
+            const theta = 0.6; 
+            
+            const stack = [node];
+            while(stack.length > 0) {
+                const n = stack.pop();
+                if(n.bodies.length === 0) continue;
+
+                const dx = n.com.x - p.x;
+                const dy = n.com.y - p.y;
+                const dz = n.com.z - p.z;
+                const r2 = dx*dx + dy*dy + dz*dz;
+                const r = Math.sqrt(r2);
+                const r_eff = Math.max(r, PARAMS.softening);
+
+                const isLeaf = !n.divided;
+                if( (n.boundary.w / r_eff < theta) || isLeaf ) {
+                    if(isLeaf && n.bodies.length===1 && n.bodies[0]===p) continue;
+
+                    const Q = n.totalQ * PARAMS.WEIGHT * PARAMS.interStrength;
+                    const f = (9e9 * Q) / (r_eff * r_eff * r_eff); 
+                    
+                    Ex += f * dx;
+                    Ey += f * dy;
+                    Ez += f * dz;
+                } else {
+                    if(n.nwf) stack.push(n.nwf, n.nef, n.swf, n.sef, n.nwb, n.neb, n.swb, n.seb);
+                }
+            }
+            return {x:Ex, y:Ey, z:Ez};
+        }
+
+        // --- CALCULS ---
+        function calculateField() {
+            if(PARAMS.interStrength <= 0) {
+                for(let i=0; i<PARAMS.numParticles; i++) cachedE[i] = {x:0,y:0,z:0};
+                return;
+            }
+            
+            const s = PARAMS.R_maj*3;
+            const octree = new Octree({x:0,y:0,z:0, w:s, h:s, d:s}, 8);
+            for(let p of particles) octree.insert(p);
+            octree.computeMoments();
+
+            for(let i=0; i<PARAMS.numParticles; i++) {
+                cachedE[i] = computeForces(particles[i], octree);
+            }
+        }
+
+        function stepParticles() {
+            const dt = PARAMS.baseTimeStep * PARAMS.speedMult;
+            let maxV = 0;
+
+            for(let i=0; i<PARAMS.numParticles; i++) {
+                const p = particles[i];
+                const E = cachedE[i];
+                const B = getTokamakB(p.x, p.y, p.z);
+
+                const qm = p.q / p.m;
+                const alpha = qm * dt * 0.5;
+
+                const vmx = p.vx + alpha * E.x;
+                const vmy = p.vy + alpha * E.y;
+                const vmz = p.vz + alpha * E.z;
+
+                const v2 = vmx*vmx + vmy*vmy + vmz*vmz;
+                const gamma = Math.sqrt(1 + v2/(C.c*C.c));
+
+                const tx = alpha * B.x / gamma;
+                const ty = alpha * B.y / gamma;
+                const tz = alpha * B.z / gamma;
+                const t2 = tx*tx + ty*ty + tz*tz;
+
+                const s = 2 / (1 + t2);
+                const sx = s*tx, sy = s*ty, sz = s*tz;
+
+                const vpx = vmx + (vmy*tz - vmz*ty);
+                const vpy = vmy + (vmz*tx - vmx*tz);
+                const vpz = vmz + (vmx*ty - vmy*tx);
+
+                const vplx = vmx + (vpy*sz - vpz*sy);
+                const vply = vmy + (vpz*sx - vpx*sz);
+                const vplz = vmz + (vpx*sy - vpy*sx);
+
+                p.vx = vplx + alpha * E.x;
+                p.vy = vply + alpha * E.y;
+                p.vz = vplz + alpha * E.z;
+
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+                p.z += p.vz * dt;
+
+                const R_local = Math.sqrt(p.x*p.x + p.z*p.z);
+                const r_pol = Math.sqrt((R_local - PARAMS.R_maj)**2 + p.y*p.y);
+                
+                if(r_pol > PARAMS.r_min) {
+                    const nx = (p.x/R_local) * (R_local-PARAMS.R_maj)/r_pol;
+                    const ny = p.y/r_pol;
+                    const nz = (p.z/R_local) * (R_local-PARAMS.R_maj)/r_pol;
+                    
+                    const dot = p.vx*nx + p.vy*ny + p.vz*nz;
+                    if(dot > 0) {
+                        p.vx -= 2*dot*nx; 
+                        p.vy -= 2*dot*ny; 
+                        p.vz -= 2*dot*nz;
+                    }
+                    const corr = (r_pol - PARAMS.r_min) + 0.05;
+                    p.x -= nx*corr; p.y -= ny*corr; p.z -= nz*corr;
+                }
+                
+                if(p.vx*p.vx + p.vy*p.vy + p.vz*p.vz > maxV) maxV = p.vx*p.vx + p.vy*p.vy + p.vz*p.vz;
+            }
+            return Math.sqrt(maxV);
+        }
+
+        // ==========================================
+        // 5. GESTION GRAPHIQUE
+        // ==========================================
+        const posBuffer = new Float32Array(PARAMS.numParticles*3);
+        const colBuffer = new Float32Array(PARAMS.numParticles*3);
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(posBuffer, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colBuffer, 3));
+
+        const material = new THREE.PointsMaterial({
+            size: 2.5, // Un peu plus gros pour visibilité fond clair
+            map: new THREE.TextureLoader().load('https://threejs.org/examples/textures/sprites/disc.png'),
+            vertexColors: true,
+            transparent: true,
+            alphaTest: 0.1,
+            opacity: 1.0, // Opaque pour contraste
+            blending: THREE.NormalBlending // IMPORTANT: Pas d'additif sur fond blanc
+        });
+        const points = new THREE.Points(geometry, material);
+        scene.add(points);
+
+        initParticles();
+
+        function syncBuffers() {
+            for(let i=0; i<PARAMS.numParticles; i++) {
+                const p = particles[i];
+                posBuffer[i*3] = p.x;
+                posBuffer[i*3+1] = p.y;
+                posBuffer[i*3+2] = p.z;
+                colBuffer[i*3] = p.color[0];
+                colBuffer[i*3+1] = p.color[1];
+                colBuffer[i*3+2] = p.color[2];
+            }
+            geometry.attributes.position.needsUpdate = true;
+            geometry.attributes.color.needsUpdate = true;
+            
+            document.getElementById('pCount').innerText = PARAMS.numParticles;
+        }
+
+        // --- GUI ---
+        const gui = new dat.GUI({width: 250});
+        const f1 = gui.addFolder('Simulation');
+        f1.add(PARAMS, 'speedMult', 0.1, 5.0).name('Vitesse (x)');
+        f1.add(PARAMS, 'stepsPerFrame', 1, 50).step(1).name('Calculs/Image');
+        f1.add(PARAMS, 'paused').name('PAUSE');
+        f1.open();
+
+        const f2 = gui.addFolder('Tokamak Physics');
+        f2.add(PARAMS, 'B0', 0, 10).name('Champ B (T)');
+        f2.add(PARAMS, 'Ip', 1e5, 5e6).name('Courant Ip (A)');
+        f2.open();
+
+        const f3 = gui.addFolder('Interaction Coulomb');
+        f3.add(PARAMS, 'interStrength', 0, 2).step(0.1).name('Force Interaction');
+        f3.add(PARAMS, 'WEIGHT', 1e5, 1e8).name('Poids Macro');
+        f3.open();
+
+        gui.add({ restart: initParticles }, 'restart').name('RESTART / RESET');
+
+        // --- BOUCLE PRINCIPALE ---
+        function animate() {
+            requestAnimationFrame(animate);
+            stats.begin();
+            controls.update();
+
+            let vMax = 0;
+            if(!PARAMS.paused) {
+                calculateField();
+                for(let k=0; k<PARAMS.stepsPerFrame; k++) {
+                    vMax = stepParticles();
+                }
+                syncBuffers();
+            }
+
+            document.getElementById('stepDisplay').innerText = PARAMS.stepsPerFrame;
+            document.getElementById('vMaxDisplay').innerText = (vMax/C.c * 100).toFixed(4);
+
+            renderer.render(scene, camera);
+            stats.end();
+        }
+        
+        syncBuffers(); 
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth/window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
