@@ -103,7 +103,17 @@
         <input type="checkbox" id="ToggleCollision">
         <span class="slider-switch"></span>
     </label>
+
     <span id="collisionStatusText">Afficher les collisions</span>
+    <label class="switch">
+        <input type="checkbox" id="ToggleVelMean" checked>
+        <span class="slider-switch"></span>
+    </label>
+    <span id="velMeanStatusText">Masquer vitesse moyenne</span>
+    <canvas id="velocityMeanChart" width="500" height="250" style="position:absolute; top:240px; right:10px; background:#000000; border:1px solid white;"></canvas>
+    <div id="velocityLegend" style="position:absolute; top:220px; right:10px; color:white; font-size:14px; background:rgba(0,0,0,0.6); padding:4px 6px; border-radius:4px;">
+        📈 Moyenne (cyan) | Particule 0 (orange)
+    </div>
 
 
     <div class="range-container">
@@ -135,6 +145,13 @@
 	<script>
 	
 		var stats = new Stats();
+
+        // --- VELOCITY DATA ARRAYS ---
+        let velocityData = [];
+        let velocityMeanData = [];
+        let velocityParticleData = [];
+        const particleIndexToFollow = 0; // index de la particule suivie
+        const maxVelocityPoints = 200;
 		stats.showPanel( 1 );
 		document.body.appendChild( stats.dom );
 		
@@ -680,6 +697,7 @@
 
 			for (let body of bodies) {octree.insert(body);}
 			let vmax=0;
+            let sumVel = 0;
 			for (let body of bodies) { 
 
 				let F = computeField(body, octree);
@@ -808,10 +826,25 @@
 				
 
 
-				if(vsquare>vmax*vmax){vmax=Math.sqrt(vsquare);}         
+				if(vsquare>vmax*vmax){vmax=Math.sqrt(vsquare);}
+                sumVel += Math.sqrt(vsquare);
 			}
 
 			
+            let avgVel = sumVel / bodies.length;
+            velocityMeanData.push(avgVel);
+            if (velocityMeanData.length > maxVelocityPoints) {
+                velocityMeanData.shift();
+            }
+            // Ajout suivi particule spécifique pour le graphique (particule 0)
+            if (bodies[particleIndexToFollow]) {
+                const vp = Math.sqrt(scal(bodies[particleIndexToFollow], bodies[particleIndexToFollow]));
+                velocityParticleData.push(vp);
+                if (velocityParticleData.length > maxVelocityPoints) {
+                    velocityParticleData.shift();
+                }
+            }
+
 			update_trajectoire();
 			return vmax;
 		}
@@ -861,7 +894,8 @@
 			render();
 
 
-			renderer.render(scene, camera);	
+			renderer.render(scene, camera);
+            drawMeanVelocityChart();
 			stats.update();
 		}
 		const option1 = document.getElementById('toggleVisibility');
@@ -1051,6 +1085,81 @@ if (resetButton) {
 }
 
 		animate();
+    // --- Enhanced Mean & Particle Velocity Chart Drawing ---
+    function drawMeanVelocityChart() {
+        const canvas = document.getElementById("velocityMeanChart");
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // compute max for auto-scale
+        let maxV = Math.max(...velocityMeanData, ...velocityParticleData, 1e-9);
+
+        ctx.fillStyle = "white";
+        ctx.font = "14px Arial";
+        ctx.fillText("Vitesse moyenne / c", 10, 15);
+
+        // draw axes
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(40, 20);
+        ctx.lineTo(40, canvas.height - 30);
+        ctx.lineTo(canvas.width - 10, canvas.height - 30);
+        ctx.stroke();
+
+        const offsetX = 40;
+        const offsetY = canvas.height - 30;
+        const plotHeight = canvas.height - 50;
+
+        // draw mean velocity curve (cyan)
+        ctx.beginPath();
+        ctx.moveTo(offsetX, offsetY);
+        for (let i = 0; i < velocityMeanData.length; i++) {
+            const x = offsetX + (i / maxVelocityPoints) * (canvas.width - offsetX - 10);
+            const y = offsetY - (velocityMeanData[i] / maxV) * plotHeight;
+            ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = "cyan";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // draw particle velocity curve (orange)
+        ctx.beginPath();
+        ctx.moveTo(offsetX, offsetY);
+        for (let i = 0; i < velocityParticleData.length; i++) {
+            const x = offsetX + (i / maxVelocityPoints) * (canvas.width - offsetX - 10);
+            const y = offsetY - (velocityParticleData[i] / maxV) * plotHeight;
+            ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = "orange";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // draw numeric values
+        ctx.fillStyle = "cyan";
+        ctx.fillText("Moyenne: " + (velocityMeanData[velocityMeanData.length-1]/celerite).toFixed(3) + "c", canvas.width - 150, 20);
+        ctx.fillStyle = "orange";
+        ctx.fillText("Particule 0: " + (velocityParticleData[velocityParticleData.length-1]/celerite).toFixed(3) + "c", canvas.width - 150, 40);
+    }
+</script>
+<script>
+// --- Toggle Velocity Mean Chart Display ---
+const VelMeanCheckbox = document.getElementById("ToggleVelMean");
+const VelMeanStatusText = document.getElementById("velMeanStatusText");
+function toggleVelMeanVisibility(isVisible) {
+    const canvas = document.getElementById("velocityMeanChart");
+    canvas.style.display = isVisible ? "block" : "none";
+    if (VelMeanStatusText) {
+        VelMeanStatusText.textContent = isVisible ? "Masquer vitesse moyenne" : "Afficher vitesse moyenne";
+    }
+}
+toggleVelMeanVisibility(true);
+if (VelMeanCheckbox) {
+    VelMeanCheckbox.addEventListener("change", () =>
+        toggleVelMeanVisibility(VelMeanCheckbox.checked)
+    );
+}
     </script>
 </body>
 </html>
