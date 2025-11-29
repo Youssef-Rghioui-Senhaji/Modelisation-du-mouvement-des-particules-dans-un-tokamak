@@ -179,13 +179,13 @@
 		const permeability=1.2*10e-6; //permeabilité du vide
 		const pi=3.1415;
 		const me=10e-30; // masse d'un electron (valeurs de test)
-		const mp=10e-30; // masse s'un proton
+		const mp=10e-29; // masse s'un proton
 		const qe=10e-19; // charge elementaire (valeur d'échelle)
 
-		let B0=50; // champ toroïdal de base (échelle)
-		const Ip=1e7; // courant plasma (échelle)
+		let B0=1; // champ toroïdal de base (échelle)
+		const Ip=1e4; // courant plasma (échelle)
 
-		const coefvitesse1=1e8; // constante multiplicatrice pour la vitesse initiale 
+		const coefvitesse1=1e7; // constante multiplicatrice pour la vitesse initiale 
 		
 		const celerite = 1e9; //vitesse de la lumière (échelle: garder >> vitesses sim)
 		
@@ -350,14 +350,14 @@
 			if (node.bodies.length === 1 || (node.boundary.w / dist) < theta) {
 				let n = { x: dx/dist, y: dy/dist, z: dz/dist };
 				let v = { x: node.vx, y: node.vy, z: node.vz };
-				let vbody = { x: body.vx, y: body.vy, z: body.vz };
 				let a = { x: node.ax, y: node.ay, z: node.az };
+				let charge = node.charge;
 
 				//beta = v/c (source)
-				let beta = { x: v.x / celerite, y: v.y / celerite, z: v.z / celerite };
-				let betasq = 0
+				let beta = hom(1/celerite,v);
+				let betasq = scal(beta,beta);
 				
-				let lorentz = 1 ;
+				let lorentz = 1 / Math.sqrt(Math.max(1 - betasq, 1e-30)) ;
 
 
 				let one_minus_n_dot_beta = 1 - scal(n, beta);
@@ -371,12 +371,12 @@
 				let denom2 = 4 * Math.PI * permitivity * (celerite*celerite) * dist * (one_minus_n_dot_beta**3);
 
 				let n_minus_beta = sum(n, hom(-1, beta));
-				let T1 = hom(node.charge / Math.max(denom1, 1e-10), n_minus_beta);
+				let T1 = hom(-charge / Math.max(denom1, 1e-10), n_minus_beta);
 				let T2vec = vect(n, vect(n_minus_beta, a));
-				let T2 = hom(node.charge / Math.max(denom2, 1e-10), T2vec);
+				let T2 = hom(-charge / Math.max(denom2, 1e-10), T2vec);
 
 				let E = sum(T1, T2);
-				E = hom(1e13/numBodies,E);
+				E = hom(1e15/numBodies,E);
 
 				
 
@@ -449,6 +449,8 @@
 			if (isFinite(denom) && denom > 0) {
 				Bpolo = hom(permeability * Ip / denom, vect({x:-Math.sin(phi), y:0, z:Math.cos(phi)}, vec));
 			}
+			if(Math.random()<0.00001){console.log(Btoro,Bpolo);}
+
 			let Btot = sum(Bpolo, Btoro);
 			return Btot;
 		}
@@ -500,7 +502,7 @@
 					charge, mass, lorentz: 1 / Math.sqrt(Math.max(1 - (vx*vx + vy*vy + vz*vz) / (celerite*celerite), 1e-30))
 				});
 
-				let color = (charge < 0) ? 0xff0000 : 0x0000ff;
+				let color = (charge < 0) ? 0x0000ff : 0xff0000;
 
 				let geom = new THREE.BufferGeometry();
 				geom.setAttribute(
@@ -548,7 +550,7 @@
 			for (let i = 0; i < 2 * numTrajectoire; i++) {
 				const geom = new THREE.BufferGeometry();
 				geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0,0,0]), 3));
-				const color = (i % 2 === 0) ? 0xf5aa42 : 0x00ffff;
+				const color = (i % 2 === 0) ? 0x00ffff : 0xf5aa42;
 				// IMPORTANT: Opacité à 0 par défaut (sera contrôlée par isTrajectoryVisible)
 				const mat = new THREE.PointsMaterial({ color: color, size: 2, opacity: 0, sizeAttenuation: false }); 
 				const p = new THREE.Points(geom, mat);
@@ -561,8 +563,7 @@
 		createBodiesAndEtoiles(numBodies);
 		createColisions();
 		createTrajectoire();
-		console.log("APPELED: createBodiesAndEtoiles, createColisions, createTrajectoire");
-		
+
 		function resetSimulation(numBodies) {
 
 			console.log("RESET");
@@ -672,9 +673,6 @@
 			last.position.set(body.x,body.y,body.z)
 			compteurColisions+=1;
 		}
-
-			
-		// --- FONCTION DE SIMULATION ---
 		function update(dt) {
 			let octree = new Octree({ x: 0, y: 0, z: 0, w: coefsize*width, h: coefsize*height, d: coefsize*depth }, 4);
 
@@ -712,7 +710,7 @@
 				let lorentzi=copyBody.lorentz;
 
 				let k=0.5*dt*body.charge/body.mass;
-				let C=hom(k,B); let Ci=hom(k,B);
+				let C=hom(k,Btot); let Ci=hom(k,Btoti);
 				let A= 1/(lorentzi*lorentzi+scal(Ci,Ci));
 
 				
@@ -745,13 +743,15 @@
 				let vbody={x:body.vx,y:body.vy,z:body.vz};
 				let vsquare = scal(vbody,vbody);
 
+
+				vsquare=scal(vbody,vbody);
+
 				if(Math.sqrt(vsquare)>celerite){
 					vbody=hom(celerite*0.999999/Math.sqrt(vsquare),vbody);
 					body.vx=vbody.x;
 					body.vy=vbody.y;
 					body.vz=vbody.z;
 				}
-				vsquare=scal(vbody,vbody);
 
 				body.x += body.vx*dt;
 				body.y += body.vy*dt;
@@ -853,7 +853,7 @@
 		function animate() {
 			requestAnimationFrame(animate);
 			const now = performance.now();
-			let deltaTime = 1e-9 ;
+			let deltaTime = 3e-9 ;
 			lastTime = now;
 
 			let vmax = update(deltaTime);
