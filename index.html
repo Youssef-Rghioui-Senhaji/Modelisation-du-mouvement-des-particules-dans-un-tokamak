@@ -1,0 +1,44 @@
+# Simulation_Tokamak (Version v.1 - scripts séparés + simulation GPU)
+
+--- FILE: index.html ---
+
+<!doctype html>
+
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simulation Galaxie — B3 (GPU)</title>
+  <style>
+    body{margin:0;overflow:hidden;font-family:Arial, Helvetica, sans-serif}
+    #ui{position:absolute;left:10px;top:10px;z-index:20;color:#eee}
+    #ui .row{margin-bottom:8px}
+    button,input[type=range]{cursor:pointer}
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div class="row"><button id="btnReset">Réinitialiser</button>
+    <label style="margin-left:10px"><input type="checkbox" id="chkTraj"> Afficher trajectoire</label>
+    <label style="margin-left:10px"><input type="checkbox" id="chkCollision"> Afficher collisions</label>
+    </div>
+    <div class="row">Particules: <input id="numParticles" type="range" min="128" max="8192" step="128" value="1024"><span id="numParticlesVal">1024</span></div>
+    <div class="row">B0: <input id="sliderB0" type="range" min="0" max="200" step="1" value="50"><span id="B0Val">50</span></div>
+  </div>
+
+  <!-- Three.js -->
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <!-- GPUComputationRenderer (version adaptée pour r128) -->
+
+  <script src="js/GPUComputationRenderer.js"></script>
+
+  <!-- App code (main + physics + rendering) -->
+
+  <script src="js/app.js"></script>
+
+</body>
+</html>
+
+--- END: index.html ---
