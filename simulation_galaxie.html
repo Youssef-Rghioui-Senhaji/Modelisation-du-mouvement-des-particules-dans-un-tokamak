@@ -536,7 +536,7 @@
                 for (let i = 0; i < 2 * numTrajectoire; i++) {
                     const geom = new THREE.BufferGeometry();
                     geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0,0,0]), 3));
-                    const color = (i % 2 === 0) ? 0xf5aa42 : 0x00ffff;
+                    const color = (i % 2 === 0) ? 0x00ffff : 0xf5aa42;
                     const mat = new THREE.PointsMaterial({ color: color, size: 2, opacity: 0, transparent: true, sizeAttenuation: false }); 
                     const p = new THREE.Points(geom, mat);
                     trajectoire.push(p);
