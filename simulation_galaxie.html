@@ -57,6 +57,42 @@
 			.ui-btn.pause:hover { background: #ff9f1a; }
 			.ui-btn.danger { background: crimson; }
 			.ui-btn.danger:hover { background: #dc1438; }
+
+			/* --- HISTOGRAM PANEL (top-right) --- */
+			#histogram-panel {
+				position: fixed;
+				top: 20px;
+				right: 20px;
+				width: 360px;
+				background: rgba(20, 20, 30, 0.9);
+				color: white;
+				padding: 12px;
+				border-radius: 10px;
+				z-index: 10;
+				display: none; /* hidden by default */
+			}
+			#histogram-panel h4 {
+				margin: 0 0 8px 0;
+				font-size: 14px;
+				text-align: center;
+			}
+			#histogram-canvas {
+				width: 100%;
+				height: 240px;
+				background: #0b0b12;
+				border-radius: 6px;
+			}
+			#btn-histogram {
+				margin-top: 6px;
+				width: 100%;
+				padding: 6px;
+				border: none;
+				border-radius: 6px;
+				cursor: pointer;
+				background: #4a4a5a;
+				color: white;
+			}
+			#btn-histogram:hover { background: #5a5a6a; }
 		</style>
     </head>
     <body>
@@ -78,7 +114,13 @@
                 <button class="ui-btn" id="btn-collisions">Collisions</button>
                 <button class="ui-btn pause" id="btn-pause">Pause</button>
                 <button class="ui-btn danger" id="btn-reset">Réinitialiser</button>
+                <button class="ui-btn" id="btn-histogram">Histogramme</button>
             </div>
+        </div>
+
+        <div id="histogram-panel">
+            <h4>Histogramme des vitesses (en % de c)</h4>
+            <canvas id="histogram-canvas" width="340" height="240"></canvas>
         </div>
 
         <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -145,6 +187,11 @@
             let isTrajectoryVisible = false;
             let isCollisionVisible = false;
             let paused = false;
+
+            // --- HISTOGRAM STATE ---
+            let isHistogramVisible = false;
+            const HISTO_BIN_COUNT = 6;           // number of bins
+            const HISTO_MAX_RATIO = 0.01;        // 1% of c -> fixed visible scale
 
            // --- CLASSE Octree ---
             class Octree {
@@ -729,12 +776,127 @@
 
                 if (!paused) {
                     update(deltaTime);
-                }	
+                }
                 render();
+                drawHistogram();
                 controls.update();
                 renderer.render(scene, camera);
             }
             animate();
+
+            function computeSpeedHistogram() {
+                const counts = new Array(HISTO_BIN_COUNT).fill(0);
+                if (!bodies || bodies.length === 0) {
+                    return { counts, bins: [], maxRatio: 0 };
+                }
+
+                const maxR = HISTO_MAX_RATIO; // fixed scale
+                const step = maxR / HISTO_BIN_COUNT;
+                const bins = [];
+                for (let i = 0; i <= HISTO_BIN_COUNT; i++) {
+                    bins.push(i * step);
+                }
+
+                let maxRatioSeen = 0;
+
+                for (let b of bodies) {
+                    const v = Math.sqrt(b.vx*b.vx + b.vy*b.vy + b.vz*b.vz);
+                    const ratio = v / celerite; // v/c
+                    if (ratio > maxRatioSeen) maxRatioSeen = ratio;
+
+                    let idx = Math.floor(ratio / step);
+                    if (idx < 0) idx = 0;
+                    if (idx >= HISTO_BIN_COUNT) idx = HISTO_BIN_COUNT - 1;
+                    counts[idx]++;
+                }
+
+                return { counts, bins, maxRatio: maxRatioSeen };
+            }
+
+            function drawHistogram() {
+                if (!isHistogramVisible) return;
+                const canvas = document.getElementById('histogram-canvas');
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                const W = canvas.width;
+                const H = canvas.height;
+
+                ctx.clearRect(0, 0, W, H);
+
+                const result = computeSpeedHistogram();
+                const counts = result.counts;
+                const bins = result.bins;
+                const maxRatioSeen = result.maxRatio;
+
+                const maxCount = Math.max(1, ...counts);
+                const barCount = counts.length;
+
+                const paddingLeft = 50;
+                const paddingBottom = 32;
+                const paddingTop = 24;
+                const paddingRight = 10;
+
+                const barAreaW = W - paddingLeft - paddingRight;
+                const barAreaH = H - paddingTop - paddingBottom;
+                const barW = barAreaW / barCount;
+
+                // axes
+                ctx.strokeStyle = '#888';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(paddingLeft, paddingTop);
+                ctx.lineTo(paddingLeft, paddingTop + barAreaH);
+                ctx.lineTo(paddingLeft + barAreaW, paddingTop + barAreaH);
+                ctx.stroke();
+
+                // Y axis graduations
+                ctx.fillStyle = '#ccc';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                const ticks = 5;
+                for (let i = 0; i <= ticks; i++) {
+                    const y = paddingTop + barAreaH - (i / ticks) * barAreaH;
+                    const value = Math.round((i / ticks) * maxCount);
+                    ctx.beginPath();
+                    ctx.moveTo(paddingLeft - 4, y);
+                    ctx.lineTo(paddingLeft, y);
+                    ctx.stroke();
+                    ctx.fillText(value.toString(), paddingLeft - 6, y);
+                }
+
+                // bars + X labels
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                for (let i = 0; i < barCount; i++) {
+                    const value = counts[i];
+                    const h = (value / maxCount) * (barAreaH - 5);
+                    const x = paddingLeft + i * barW + 6;
+                    const y = paddingTop + barAreaH - h;
+                    const w = barW - 12;
+
+                    ctx.fillStyle = '#00bcd4';
+                    ctx.fillRect(x, y, w, h);
+
+                    const a = bins[i] * 100;
+                    const b = bins[i + 1] * 100;
+                    const label = a.toFixed(3) + '-' + b.toFixed(3) + '%';
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '10px Arial';
+                    ctx.fillText(label, x + w/2, paddingTop + barAreaH + 4);
+                }
+
+                // title
+                ctx.fillStyle = '#fff';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Distribution des vitesses (0 → 1% de c)', W/2, 14);
+
+                // info
+                ctx.font = '10px Arial';
+                ctx.fillStyle = '#aaa';
+                ctx.fillText('v_max réel ≈ ' + (maxRatioSeen * 100).toFixed(4) + '% de c', W/2, H - 4);
+            }
 
             // UI CONTROLS
             const btnParticles = document.getElementById("btn-particles");
@@ -746,6 +908,8 @@
             const sliderB = document.getElementById("ui-b-slider");
             const labelN = document.getElementById("ui-n");
             const labelB = document.getElementById("ui-b");
+            const btnHistogram = document.getElementById("btn-histogram");
+            const histogramPanel = document.getElementById("histogram-panel");
 
             btnParticles.addEventListener("click", () => {
                 etoilesVisibles = !etoilesVisibles;
@@ -770,6 +934,14 @@
 
             btnReset.addEventListener("click", () => {
                 resetSimulation(numBodies);
+            });
+
+            btnHistogram.addEventListener("click", () => {
+                isHistogramVisible = !isHistogramVisible;
+                histogramPanel.style.display = isHistogramVisible ? 'block' : 'none';
+                if (isHistogramVisible) {
+                    drawHistogram();
+                }
             });
 
             sliderN.addEventListener("input", () => {
