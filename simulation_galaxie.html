@@ -114,19 +114,19 @@
 
     <div class="range-container">
         <label for="slider_Bext">Valeur du champ Bext :</label><br>
-        <input type="range" id="slider_Bext" class="slider-steps" min="0" max="100" step="1" value="50">
-    <span id="val_Bext">50</span>
+        <input type="range" id="slider_Bext" class="slider-steps" min="0" max="100" step="1" value="10">
+    <span id="val_Bext">10</span>
+
+	<div class="range-container">
+        <label for="slider_Ip">Valeur courant plasma :</label><br>
+        <input type="range" id="slider_Ip" class="slider-steps" min="0" max="1e4" step="1e1" value="1e1">
+    <span id="val_Ip">10</span>
     </div>
 
     <button id="resetButton" style="padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #3498db; color: white; border: none; border-radius: 5px; margin-top: 20px;">
         Réinitialiser la Simulation (Position uniquement)
     </button>
 
-	<script>// stats.js - http://github.com/mrdoob/stats.js
-			(function(f,e){"object"===typeof exports&&"undefined"!==typeof module?module.exports=e():"function"===typeof define&&define.amd?define(e):f.Stats=e()})(this,function(){var f=function(){function e(a){c.appendChild(a.dom);return a}function u(a){for(var d=0;d<c.children.length;d++)c.children[d].style.display=d===a?"block":"none";l=a}var l=0,c=document.createElement("div");c.style.cssText="position:fixed;top:0;left:0;cursor:pointer;opacity:0.9;z-index:10000";c.addEventListener("click",function(a){a.preventDefault();
-			u(++l%c.children.length)},!1);var k=(performance||Date).now(),g=k,a=0,r=e(new f.Panel("FPS","#0ff","#002")),h=e(new f.Panel("MS","#0f0","#020"));if(self.performance&&self.performance.memory)var t=e(new f.Panel("MB","#f08","#201"));u(0);return{REVISION:16,dom:c,addPanel:e,showPanel:u,begin:function(){k=(performance||Date).now()},end:function(){a++;var c=(performance||Date).now();h.update(c-k,200);if(c>=g+1E3&&(r.update(1E3*a/(c-g),100),g=c,a=0,t)){var d=performance.memory;t.update(d.usedJSHeapSize/
-			1048576,d.jsHeapSizeLimit/1048576)}return c},update:function(){k=this.end()},domElement:c,setMode:u}};f.Panel=function(e,f,l){var c=Infinity,k=0,g=Math.round,a=g(window.devicePixelRatio||1),r=80*a,h=48*a,t=3*a,v=2*a,d=3*a,m=15*a,n=74*a,p=30*a,q=document.createElement("canvas");q.width=r;q.height=h;q.style.cssText="width:80px;height:48px";var b=q.getContext("2d");b.font="bold "+9*a+"px Helvetica,Arial,sans-serif";b.textBaseline="top";b.fillStyle=l;b.fillRect(0,0,r,h);b.fillStyle=f;b.fillText(e,t,v);
-			b.fillRect(d,m,n,p);b.fillStyle=l;b.globalAlpha=.9;b.fillRect(d,m,n,p);return{dom:q,update:function(h,w){c=Math.min(c,h);k=Math.max(k,h);b.fillStyle=l;b.globalAlpha=1;b.fillRect(0,0,r,m);b.fillStyle=f;b.fillText(g(h)+" "+e+" ("+g(c)+"-"+g(k)+")",t,v);b.drawImage(q,d+a,m,n-a,p,d,m,n-a,p);b.fillRect(d+n-a,m,a,p);b.fillStyle=l;b.globalAlpha=.9;b.fillRect(d+n-a,m,a,g((1-h/w)*p))}}};return f});</script></script>
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 	<script src="https://cdn.jsdelivr.net/npm/three/examples/js/controls/OrbitControls.js"></script>	
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.5.0/math.min.js"></script>
@@ -134,9 +134,6 @@
     
 	<script>
 	
-		var stats = new Stats();
-		stats.showPanel( 1 );
-		document.body.appendChild( stats.dom );
 		
         // --- INITIALISATION DE LA SCENE ET DE LA CAMERA ---
 		const scene = new THREE.Scene();
@@ -179,11 +176,11 @@
 		const permeability=1.2*10e-6; //permeabilité du vide
 		const pi=3.1415;
 		const me=10e-30; // masse d'un electron (valeurs de test)
-		const mp=10e-30; // masse s'un proton
+		const mp=10e-27; // masse s'un proton
 		const qe=10e-19; // charge elementaire (valeur d'échelle)
 
-		let B0=1; // champ toroïdal de base (échelle)
-		const Ip=1; // courant plasma (échelle)
+		let B0=10; // champ toroïdal de base (échelle)
+		let Ip=1; // courant plasma (échelle)
 
 		const coefvitesse1=1e7; // constante multiplicatrice pour la vitesse initiale 
 		
@@ -442,14 +439,15 @@
 
 			let Btoro = hom(B0 * R / Rp, {x: -Math.sin(phi), y: 0, z: Math.cos(phi)});
 
-			let vec = {x: body.x * (Rp - R) / Rp, y: body.y, z: body.z * (Rp - R) / Rp};
+			let vec = {x: (Rp - R) * Math.cos(phi), y: body.y, z: (Rp - R) * Math.cos(phi)};
 			let normVec = Math.sqrt(scal(vec, vec));
+			vec = hom(1/normVec,vec);
 			let denom = 2 * pi * r_eff * Math.max(normVec, eps);
 			let Bpolo = {x:0,y:0,z:0};
 			if (isFinite(denom) && denom > 0) {
-				Bpolo = hom(permeability * Ip / denom, vect({x:-Math.sin(phi), y:0, z:Math.cos(phi)}, vec));
+				Bpolo = hom(permeability * Ip * denom, vect({x:-Math.sin(phi), y:0, z:Math.cos(phi)}, vec));
 			}
-			if(Math.random()<0.00001){console.log(Btoro,Bpolo);}
+			if(Math.random()<0.00001){console.log(Btoro,Bpolo,denom,Ip);}
 
 			let Btot = sum(Bpolo, Btoro);
 			return Btot;
@@ -485,14 +483,14 @@
 
 				const th = Math.random() * 2 * Math.PI;
 				const ph = Math.random() * 2 * Math.PI;
-				const rad = r * (0.05 + 0.01 * Math.random());
+				const rad = r * (0.2 + 0.01 * Math.random());
 
 				const x = (R + rad * Math.cos(th)) * Math.cos(ph);
 				const y = rad * Math.sin(th);
 				const z = (R + rad * Math.cos(th)) * Math.sin(ph);
 
 				let vx = -coefvitesse1 * Math.sin(ph);
-				let vy = 0;
+				let vy = (Math.random()-0.5)*1e5;
 				let vz = coefvitesse1 * Math.cos(ph);
 				if (charge < 0) { vx *= -1; vz *= -1; }
 
@@ -761,7 +759,7 @@
 				body.ay=(body.vy-vy)/dt;
 				body.az=(body.vz-vz)/dt;
 
-                if (Math.random() < 0.0001) {
+                if (Math.random() < 0.00000000001) {
 					console.warn("A:",A,"k:",k,"lorentz:",lorentz,lorentzi)
                     console.warn("Btot:",Btot,"Btoti:",Btoti,"E:",E,"Ei",Ei)
                     console.warn(alpha,beta,gamma)
@@ -863,7 +861,6 @@
 
 
 			renderer.render(scene, camera);	
-			stats.update();
 		}
 		const option1 = document.getElementById('toggleVisibility');
     	const statusText = document.getElementById("statusText");
@@ -930,7 +927,8 @@
 
 		const sliders = [
     { id: "slider_nb_particules", val: "val_nb_particules", target: "bodies" },
-    { id: "slider_Bext", val: "val_Bext", target: "Bext" } // Gère Bext
+    { id: "slider_Bext", val: "val_Bext", target: "Bext" }, // Gère Bext
+	{ id: "slider_Ip", val: "val_Ip", target: "Ip" }
 ];
 
 sliders.forEach(s => {
@@ -945,7 +943,9 @@ sliders.forEach(s => {
             if (s.target === "bodies") {
                 // MODIFICATION : Mise à jour de la variable globale avant le reset
                 numBodies = num; 
-                resetSimulation(num);               
+                resetSimulation(num);
+			}else if (s.target === "Ip") {
+                Ip = num;              
             } else if (s.target === "Bext") {
                 // Mise à jour de la variable globale B0 (doit être déclarée 'let' plus haut)
                 B0 = num; 
